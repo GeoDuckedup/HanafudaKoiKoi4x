@@ -44,23 +44,15 @@ body {
 }
 
 .top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: block;
   background: var(--panel);
   border: 2px solid var(--line);
   border-radius: 12px;
-  padding: 8px 10px;
-}
-
-.top h1 {
-  margin: 0;
-  font-size: 1.1rem;
-  letter-spacing: 0.02em;
+  padding: 8px 6px;
 }
 
 .rtc-status-badge {
-  margin-top: 4px;
+  margin-top: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -108,11 +100,27 @@ body {
 }
 
 .top-actions {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.top-actions > * {
+  flex: 0 0 auto;
+}
+
+.top-actions::-webkit-scrollbar {
+  height: 6px;
+}
+
+.top-actions::-webkit-scrollbar-thumb {
+  background: #b59667;
+  border-radius: 8px;
 }
 
 .online-room-chip {
