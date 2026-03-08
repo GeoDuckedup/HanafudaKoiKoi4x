@@ -28,6 +28,10 @@
     if (!utils || typeof utils.computeCodeChecksum !== "function") {
       throw new Error("Utils bootstrap not loaded.");
     }
+    const onlineStateSyncBootstrap = window.HKKOnlineStateSync;
+    if (!onlineStateSyncBootstrap || typeof onlineStateSyncBootstrap.createOnlineStateSync !== "function") {
+      throw new Error("Online state-sync bootstrap not loaded.");
+    }
     const PRESENCE_PATIENCE_MS = 5 * 60 * 1000;
     const RECONNECT_TIMEOUT_MS = 30_000;
 
@@ -39,6 +43,7 @@
     let remoteAbandonedByRef = null;
     let remoteAbandonedByListener = null;
     let remoteRoomAbandoned = false;
+    let stateSync = null;
 
     function isOnlineFriendSessionActive() {
       return isFriendMode() && Boolean(state.rtcRole && state.rtcRoomCode);
@@ -114,29 +119,22 @@
       debugOnlineInit("online-startup-state-forced", getOnlineStartupDebugState({ reason }));
     }
 
+    function createOnlineStateSyncController() {
+      return onlineStateSyncBootstrap.createOnlineStateSync({
+        state,
+        isOnlineFriendSessionActive,
+        getOnlineLocalPlayerIndex,
+        setFriendInterstitialOpen,
+        setFriendInterstitialStatus,
+        renderAll,
+        loadCodeIntoGame,
+      });
+    }
+
     function applyOnlineWaitingStateFromCurrentTurn(reason) {
-      if (!isOnlineFriendSessionActive()) return;
-      if (state.roundTransition?.open && state.roundOver && !state.matchOver) {
-        state.rtcWaiting = false;
-        setFriendInterstitialOpen(false);
-        setFriendInterstitialStatus("", false);
-        debugOnlineInit("waiting-state-round-transition", { active: true, reason });
-        return;
-      }
-      const localPlayerIndex = getOnlineLocalPlayerIndex();
-      const turnOwner = state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : null;
-      const shouldWait = localPlayerIndex === null || turnOwner === null || localPlayerIndex !== turnOwner;
-      state.rtcWaiting = shouldWait;
-      if (shouldWait) {
-        setFriendInterstitialOpen(true, turnOwner);
-        const ownerName = turnOwner === null ? "opponent" : state.players?.[turnOwner]?.name || `P${turnOwner + 1}`;
-        setFriendInterstitialStatus(`Waiting for ${ownerName}. (${reason})`, false);
-        debugOnlineInit("waiting-state", { active: false, reason });
-        return;
-      }
-      setFriendInterstitialOpen(false);
-      setFriendInterstitialStatus("", false);
-      debugOnlineInit("waiting-state", { active: true, reason });
+      if (!stateSync) return;
+      stateSync.applyOnlineWaitingStateFromCurrentTurn(reason);
+      debugOnlineInit("waiting-state", { active: !state.rtcWaiting, reason });
     }
 
     function clearPresencePatienceTimer() {
@@ -289,6 +287,14 @@
       state.rtcReconnectFailed = false;
       state.rtcOpponentAbandoned = false;
       state.rtcOpponentAbandonedBy = "";
+      if (stateSync && typeof stateSync.clearAppliedSnapshotMarkers === "function") {
+        stateSync.clearAppliedSnapshotMarkers();
+      } else {
+        state.rtcLastAppliedSnapshotKey = "";
+        state.rtcLastAppliedSnapshotTurnIndex = -1;
+        state.rtcLastAppliedSnapshotReason = "";
+        state.rtcLastAppliedSnapshotAt = 0;
+      }
     }
 
     function getOnlineSnapshotTurnIndex() {
@@ -317,7 +323,6 @@
 
       const trimmedSnapshot = { ...snapshot };
       delete trimmedSnapshot.actionLog;
-      delete trimmedSnapshot.drawPile;
       delete trimmedSnapshot.drawPreview;
       delete trimmedSnapshot.message;
       delete trimmedSnapshot.lastTurnRecap;
@@ -381,26 +386,27 @@
       }
     }
 
-    function sendRtcSignal(payload, options = {}) {
-      const { requireSnapshotWrite = false, snapshotCode = "", context = "rtc-signal", onSnapshotWriteFailed = null } = options;
+    function sendRtcSignal(payload) {
       const rtc = getRtcBridge();
       if (!rtc || typeof rtc.sendTurnCode !== "function") return false;
       try {
-        const encodedPayload = encodeRtcSignal(payload);
-        if (requireSnapshotWrite) {
-          const normalizedSnapshotCode = String(snapshotCode || "").trim();
-          if (!normalizedSnapshotCode) return false;
-          void sendOnlineTurnCodeWithSnapshot(normalizedSnapshotCode, encodedPayload, {
-            context,
-            onSnapshotWriteFailed,
-          });
-          return true;
-        }
-        return rtc.sendTurnCode(encodedPayload);
+        return rtc.sendTurnCode(encodeRtcSignal(payload));
       } catch (err) {
         console.warn("rtc signal send failed", err);
         return false;
       }
+    }
+
+    async function sendRtcSignalWithSnapshot(payload, options = {}) {
+      const { snapshotCode = "", context = "rtc-signal", onSnapshotWriteFailed = null, onSendFailed = null } = options;
+      const normalizedSnapshotCode = String(snapshotCode || "").trim();
+      if (!normalizedSnapshotCode) return false;
+      const encodedPayload = encodeRtcSignal(payload);
+      return sendOnlineTurnCodeWithSnapshot(normalizedSnapshotCode, encodedPayload, {
+        context,
+        onSnapshotWriteFailed,
+        onSendFailed,
+      });
     }
 
     function sendHostSessionInitSignal() {
@@ -456,7 +462,7 @@
       return true;
     }
 
-    function syncOnlineRoundTransitionSnapshot() {
+    async function syncOnlineRoundTransitionSnapshot() {
       if (!isOnlineFriendSessionActive()) return true;
       if (state.rtcStatus !== "connected") return false;
       let code = "";
@@ -466,7 +472,7 @@
         console.warn("round-end snapshot encode failed", err);
         return false;
       }
-      return sendRtcSignal(
+      return sendRtcSignalWithSnapshot(
         {
           type: "turn-code",
           reason: "round-end",
@@ -474,11 +480,13 @@
           code,
         },
         {
-          requireSnapshotWrite: true,
           snapshotCode: code,
           context: "round-end-sync",
           onSnapshotWriteFailed: () => {
             setFriendInterstitialStatus("Round snapshot save failed. Retry in a moment.", true);
+          },
+          onSendFailed: () => {
+            setFriendInterstitialStatus("Round sync send failed. Waiting for reconnect.", true);
           },
         }
       );
@@ -503,6 +511,9 @@
         forceDealerPlayerIndex: 0,
         forceCurrentPlayerIndex: 0,
       });
+      if (stateSync && typeof stateSync.clearAppliedSnapshotMarkers === "function") {
+        stateSync.clearAppliedSnapshotMarkers();
+      }
       subscribeRemotePresence();
       subscribeRemoteAbandonment();
       enforceInitialOnlineStartupState("begin-online-friend-match");
@@ -567,17 +578,23 @@
         }
 
         if (snapshot && typeof snapshot.state === "string" && snapshot.state.trim()) {
-          const loaded = loadCodeIntoGame(snapshot.state, "friend", {
-            allowNonCheckpointFriendImport: true,
-            allowMissingDrawPile: true,
-          });
-          if (!loaded) {
-            throw new Error("Could not load saved online snapshot.");
+          if (!stateSync) {
+            throw new Error("Online state-sync controller unavailable.");
           }
-          state.rtcPendingStart = false;
-          state.rtcInitApplied = true;
-          applyOnlineWaitingStateFromCurrentTurn("reconnect");
-          renderAll();
+          const result = stateSync.applyReconnectSnapshot(snapshot, { reason: "reconnect" });
+          if (result.duplicate) {
+            debugOnlineInit("reconnect-snapshot-duplicate", {
+              turnIndex: result.turnIndex,
+              reason: "reconnect",
+            });
+            applyOnlineWaitingStateFromCurrentTurn("reconnect-duplicate");
+            renderAll();
+            return true;
+          }
+          debugOnlineInit("reconnect-snapshot-applied", {
+            turnIndex: result.turnIndex,
+            reason: "reconnect",
+          });
           return true;
         }
 
@@ -606,6 +623,9 @@
         state.rtcInitSent = false;
         state.rtcInitApplied = false;
         state.rtcStatus = "error";
+        if (stateSync && typeof stateSync.clearAppliedSnapshotMarkers === "function") {
+          stateSync.clearAppliedSnapshotMarkers();
+        }
         throw err;
       }
     }
@@ -662,19 +682,28 @@
               ? describeTurnOwnerForDebug(signal.currentTurnOwner)
               : "unknown",
         });
-        const loaded = loadCodeIntoGame(code, "friend", {
-          allowNonCheckpointFriendImport: true,
-          allowMissingDrawPile: true,
-        });
-        if (!loaded) {
+        if (!stateSync) {
+          throw new Error("Online state-sync controller unavailable.");
+        }
+        let result = null;
+        try {
+          result = stateSync.applyAuthoritativeSnapshot(code, {
+            reason: "session-init",
+            markInitApplied: true,
+          });
+        } catch (_err) {
           setFriendInterstitialOpen(true, state.currentPlayer);
           setFriendInterstitialStatus("Initial sync failed. Ask host to reconnect the room.", true);
           renderAll();
           return;
         }
+        if (result.duplicate) {
+          debugOnlineInit("guest-session-init-duplicate", {
+            currentTurnOwnerAfterInit: describeTurnOwnerForDebug(state.currentPlayer),
+          });
+          return;
+        }
         enforceInitialOnlineStartupState("guest-session-init-apply");
-        state.rtcInitApplied = true;
-        applyOnlineWaitingStateFromCurrentTurn("session-init");
         debugOnlineInit(
           "guest-session-init-applied",
           getOnlineStartupDebugState({ currentTurnOwnerAfterInit: describeTurnOwnerForDebug(state.currentPlayer) })
@@ -683,18 +712,27 @@
       }
       if (type === "turn-code") {
         const code = typeof signal.code === "string" ? signal.code : "";
-        const loaded = loadCodeIntoGame(code, "friend", {
-          allowNonCheckpointFriendImport: true,
-          allowMissingDrawPile: true,
-        });
-        if (!loaded) {
+        if (!stateSync) {
+          throw new Error("Online state-sync controller unavailable.");
+        }
+        try {
+          const result = stateSync.applyAuthoritativeSnapshot(code, {
+            reason: "signal-turn-code",
+            markInitApplied: true,
+          });
+          if (result.duplicate) {
+            debugOnlineInit("signal-turn-code-duplicate", {
+              currentTurnOwnerAfterApply: describeTurnOwnerForDebug(state.currentPlayer),
+            });
+            return;
+          }
+        } catch (_err) {
           setFriendInterstitialOpen(true, state.currentPlayer);
           setFriendInterstitialStatus("Incoming online turn sync failed. Wait for reconnect.", true);
           renderAll();
           return;
         }
         setFriendInterstitialStatus("", false);
-        applyOnlineWaitingStateFromCurrentTurn("signal-turn-code");
         return;
       }
       if (type === "round-ready") {
@@ -727,6 +765,43 @@
       }
     }
 
+    function handleIncomingRtcPayload(rawPayload) {
+      if (state.rtcPendingStart) {
+        beginOnlineFriendMatch();
+      }
+      let signal = null;
+      try {
+        signal = tryDecodeRtcSignal(rawPayload);
+      } catch (err) {
+        throw new Error(`Incoming online signal failed: ${err.message}`);
+      }
+      if (signal) {
+        handleIncomingRtcSignal(signal);
+        return true;
+      }
+      if (!stateSync) {
+        throw new Error("Online state-sync controller unavailable.");
+      }
+      try {
+        const result = stateSync.applyAuthoritativeSnapshot(rawPayload, {
+          reason: "raw-turn-code",
+          markInitApplied: true,
+        });
+        if (result.duplicate) {
+          debugOnlineInit("raw-turn-code-duplicate", {
+            currentTurnOwnerAfterApply: describeTurnOwnerForDebug(state.currentPlayer),
+          });
+          return true;
+        }
+      } catch (err) {
+        throw new Error(`Incoming online turn sync failed: ${err.message}`);
+      }
+      setFriendInterstitialStatus("", false);
+      return true;
+    }
+
+    stateSync = createOnlineStateSyncController();
+
     return {
       isOnlineFriendSessionActive,
       getOnlineLocalPlayerIndex,
@@ -751,6 +826,7 @@
       handleRtcDisconnectAutoReconnect,
       clearOnlineRealtimeSubscriptions,
       handleIncomingRtcSignal,
+      handleIncomingRtcPayload,
     };
   }
 

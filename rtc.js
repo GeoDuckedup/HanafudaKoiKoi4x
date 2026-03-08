@@ -9,6 +9,7 @@
   const AUTH_WAIT_TIMEOUT_MS = 60_000;
   const RTC_SIGNAL_PREFIX = "HKKSIG1.";
   const MAX_MESSAGE_PAYLOAD_LENGTH = 16_000;
+  const ROOM_INDEX_VERSION = 1;
 
   let role = null;
   let roomCode = "";
@@ -110,6 +111,110 @@
     return expiresAt <= nowMs;
   }
 
+  function computeRoomJoinState(metadata, nowMs = Date.now()) {
+    if (isRoomExpired(metadata, nowMs)) return "expired";
+    if (metadata?.abandoned) return "closed";
+    if (!metadata?.hostUid) return "expired";
+    if (metadata?.guestUid) return "full";
+    return "open";
+  }
+
+  function buildRoomIndexPayload(metadata, nowMs = Date.now()) {
+    const expiresAtValue = Number(metadata?.expiresAt);
+    const updatedAtValue = Number(metadata?.lastActiveAt || metadata?.updatedAt);
+    return {
+      version: ROOM_INDEX_VERSION,
+      exists: true,
+      hasHost: Boolean(metadata?.hostUid),
+      hasGuest: Boolean(metadata?.guestUid),
+      joinState: computeRoomJoinState(metadata, nowMs),
+      expiresAt: Number.isFinite(expiresAtValue) && expiresAtValue > 0 ? Math.floor(expiresAtValue) : 0,
+      updatedAt: Number.isFinite(updatedAtValue) && updatedAtValue > 0 ? Math.floor(updatedAtValue) : nowMs,
+    };
+  }
+
+  async function readRoomIndexInternal(db, code) {
+    const targetCode = normalizeRoomCode(code);
+    if (!targetCode) {
+      return {
+        exists: false,
+        hasHost: false,
+        hasGuest: false,
+        joinState: "expired",
+        expiresAt: null,
+        updatedAt: null,
+      };
+    }
+    try {
+      const indexSnap = await db.ref(`roomIndex/${targetCode}`).once("value");
+      const raw = indexSnap?.val();
+      if (!raw || typeof raw !== "object") {
+        return {
+          exists: false,
+          hasHost: false,
+          hasGuest: false,
+          joinState: "expired",
+          expiresAt: null,
+          updatedAt: null,
+        };
+      }
+      const joinState = String(raw.joinState || "").trim().toLowerCase();
+      return {
+        exists: Boolean(raw.exists),
+        hasHost: Boolean(raw.hasHost),
+        hasGuest: Boolean(raw.hasGuest),
+        joinState:
+          joinState === "open" || joinState === "full" || joinState === "expired" || joinState === "closed"
+            ? joinState
+            : "expired",
+        expiresAt: Number(raw.expiresAt || 0) || null,
+        updatedAt: Number(raw.updatedAt || 0) || null,
+      };
+    } catch (err) {
+      console.warn("rtc readRoomIndex failed", { roomCode: targetCode, err });
+      return {
+        exists: false,
+        hasHost: false,
+        hasGuest: false,
+        joinState: "expired",
+        expiresAt: null,
+        updatedAt: null,
+      };
+    }
+  }
+
+  async function syncRoomIndexFromLifecycle(db, code) {
+    const targetCode = normalizeRoomCode(code);
+    if (!targetCode) return false;
+    try {
+      const metadata = await readRoomLifecycleMetadataInternal(db, targetCode);
+      const nowMs = Date.now();
+      await db.ref(`roomIndex/${targetCode}`).set(buildRoomIndexPayload(metadata, nowMs));
+      return true;
+    } catch (err) {
+      console.warn("rtc roomIndex sync failed", { roomCode: targetCode, err });
+      return false;
+    }
+  }
+
+  function touchRoomIndexActivity(db, code, nowMs = Date.now()) {
+    const targetCode = normalizeRoomCode(code);
+    if (!targetCode) return Promise.resolve(false);
+    return db
+      .ref(`roomIndex/${targetCode}`)
+      .update({
+        version: ROOM_INDEX_VERSION,
+        exists: true,
+        expiresAt: nowMs + ROOM_TTL_MS,
+        updatedAt: nowMs,
+      })
+      .then(() => true)
+      .catch((err) => {
+        console.warn("rtc roomIndex activity touch failed", { roomCode: targetCode, err });
+        return false;
+      });
+  }
+
   async function readRoomLifecycleMetadataInternal(db, code) {
     const targetCode = normalizeRoomCode(code);
     if (!targetCode) {
@@ -163,7 +268,10 @@
       return { expired: false, removed: false, metadata };
     }
     try {
-      await db.ref(`rooms/${targetCode}`).remove();
+      const updates = {};
+      updates[`rooms/${targetCode}`] = null;
+      updates[`roomIndex/${targetCode}`] = null;
+      await db.ref().update(updates);
       return { expired: true, removed: true, metadata };
     } catch (err) {
       console.warn("rtc expired room cleanup failed", { roomCode: targetCode, err });
@@ -197,7 +305,7 @@
     return db
       .ref(`rooms/${roomCode}`)
       .update(buildRoomActivityUpdate(nowMs))
-      .then(() => true)
+      .then(() => touchRoomIndexActivity(db, roomCode, nowMs))
       .catch((err) => {
         console.warn("rtc room activity touch failed", err);
         return false;
@@ -227,6 +335,7 @@
       .update(payload)
       .then(() => {
         lastRoomActivityTouchAt = nowMs;
+        touchRoomIndexActivity(db, roomCode, nowMs).catch(() => {});
       })
       .catch((err) => {
         console.warn("rtc could not mark room connected", err);
@@ -487,9 +596,8 @@
     const normalized = normalizeRoomCode(inputRoomCode);
     assertValidRoomCode(normalized);
 
-    await withDbStep("Cleanup expired room", () => cleanupExpiredRoomIfNeeded(db, normalized));
-    const existingMetadata = await withDbStep("Read room metadata", () => readRoomLifecycleMetadataInternal(db, normalized));
-    if (existingMetadata.hostUid && existingMetadata.hostUid !== authUser.uid) {
+    const existingIndex = await withDbStep("Read room index", () => readRoomIndexInternal(db, normalized));
+    if (existingIndex.exists && existingIndex.joinState !== "expired") {
       throw new Error("Room code already in use. Try another room code.");
     }
     const rateLimitSnapshot = await withDbStep("Read host rate limit", () =>
@@ -506,15 +614,20 @@
 
     try {
       await withDbStep("Set hostUid", () => db.ref(roomPath("hostUid")).set(authUser.uid));
-      await withDbStep("Initialize room metadata", () =>
-        initializeRoomMetadata(db, { preserveCreatedAt: Boolean(existingMetadata.createdAt) })
-      );
+      await withDbStep("Initialize room metadata", () => initializeRoomMetadata(db, { preserveCreatedAt: false }));
+      const priorGuestUidSnap = await withDbStep("Read prior guestUid", () => db.ref(roomPath("guestUid")).once("value"));
+      const priorGuestUid = String(priorGuestUidSnap?.val() || "");
       await withDbStep("Clear abandoned", () => db.ref(roomPath("abandoned")).remove());
       await withDbStep("Clear abandonedBy", () => db.ref(roomPath("abandonedBy")).remove());
       await withDbStep("Clear guestUid", () => db.ref(roomPath("guestUid")).remove());
+      if (priorGuestUid) {
+        await withDbStep("Clear prior guest memberMap", () => db.ref(roomPath(`memberMap/${priorGuestUid}`)).remove());
+      }
+      await withDbStep("Set host memberMap", () => db.ref(roomPath(`memberMap/${authUser.uid}`)).set("host"));
       await withDbStep("Clear messages", () => db.ref(roomPath("messages")).remove());
       await withDbStep("Set connected false", () => db.ref(roomPath("connected")).set(false));
       await withDbStep("Refresh room activity", () => touchRoomActivity(db, { force: true }));
+      await withDbStep("Sync room index", () => syncRoomIndexFromLifecycle(db, normalized));
       await withDbStep("Set host presence", () => setupPresence(db));
       await withDbStep("Write room creation rate limit", () => {
         const serverTimestamp = window.firebase?.database?.ServerValue?.TIMESTAMP ?? Date.now();
@@ -531,6 +644,10 @@
       role = null;
       roomCode = "";
       setStatus("error");
+      const message = String(err?.message || "").toLowerCase();
+      if (message.includes("permission_denied")) {
+        throw new Error("Room code already in use. Try another room code.");
+      }
       throw err;
     }
   }
@@ -541,43 +658,25 @@
     const normalized = normalizeRoomCode(inputRoomCode);
     assertValidRoomCode(normalized);
 
-    const existingMetadata = await withDbStep("Read room metadata", () => readRoomLifecycleMetadataInternal(db, normalized));
-    if (isRoomExpired(existingMetadata)) {
-      await withDbStep("Cleanup expired room", () => cleanupExpiredRoomIfNeeded(db, normalized));
+    const roomIndex = await withDbStep("Read room index", () => readRoomIndexInternal(db, normalized));
+    if (roomIndex.exists && roomIndex.joinState === "expired") {
       throw new Error("Room has expired. Ask host to create a new room.");
     }
-    const hostUid = String(existingMetadata.hostUid || "");
-    if (!hostUid) {
-      throw new Error("Host room not found. Ask host to create a new room.");
-    }
-    if (existingMetadata.abandoned) {
-      const abandonedBy = String(existingMetadata.abandonedBy || "");
-      if (abandonedBy === "host") {
-        throw new Error("Host has left this room. Ask your friend to host a new room.");
-      }
+    if (roomIndex.exists && roomIndex.joinState === "closed") {
       throw new Error("This room was closed. Ask your friend to host a new room.");
     }
-    if (hostUid === authUser.uid) {
-      throw new Error(
-        "This browser is already the host for that room. To test both players yourself, use a different browser or a private/incognito window."
-      );
-    }
-
-    const guestUidRef = db.ref(`rooms/${normalized}/guestUid`);
-    const guestUidResult = await withDbStep("Claim guestUid", () =>
-      guestUidRef.transaction((current) => {
-        if (current === null || current === authUser.uid) return authUser.uid;
-        return current;
-      })
-    );
-    if (!guestUidResult.committed || guestUidResult.snapshot.val() !== authUser.uid) {
+    if (roomIndex.exists && roomIndex.joinState === "full") {
       throw new Error("Room is full. Ask host to create a new room.");
     }
 
-    beginSession("guest", normalized, onReceiveCallback);
-
+    let guestClaimed = false;
     try {
+      await withDbStep("Claim guestUid", () => db.ref(`rooms/${normalized}/guestUid`).set(authUser.uid));
+      guestClaimed = true;
+      await withDbStep("Set guest memberMap", () => db.ref(`rooms/${normalized}/memberMap/${authUser.uid}`).set("guest"));
+      beginSession("guest", normalized, onReceiveCallback);
       await withDbStep("Refresh room activity", () => touchRoomActivity(db, { force: true }));
+      await withDbStep("Sync room index", () => syncRoomIndexFromLifecycle(db, normalized));
       await withDbStep("Set guest presence", () => setupPresence(db));
       subscribeRelayListeners(db);
       startKeepalive();
@@ -585,11 +684,22 @@
       return true;
     } catch (err) {
       console.warn("rtc joinRoom failed", err);
-      db.ref(`rooms/${normalized}/guestUid`).remove().catch(() => {});
+      if (guestClaimed) {
+        db.ref(`rooms/${normalized}/guestUid`).remove().catch(() => {});
+        db.ref(`rooms/${normalized}/memberMap/${authUser.uid}`).remove().catch(() => {});
+        syncRoomIndexFromLifecycle(db, normalized).catch(() => {});
+      }
       closeSessionOnly();
       role = null;
       roomCode = "";
       setStatus("error");
+      const message = String(err?.message || "").toLowerCase();
+      if (message.includes("permission_denied")) {
+        if (!roomIndex.exists || !roomIndex.hasHost) {
+          throw new Error("Host room not found. Ask host to create a new room.");
+        }
+        throw new Error("Room is full. Ask host to create a new room.");
+      }
       throw err;
     }
   }
@@ -667,7 +777,10 @@
     if (!normalized) return false;
     assertValidRoomCode(normalized);
     try {
-      await db.ref(`rooms/${normalized}`).remove();
+      const updates = {};
+      updates[`rooms/${normalized}`] = null;
+      updates[`roomIndex/${normalized}`] = null;
+      await db.ref().update(updates);
       return true;
     } catch (err) {
       console.warn("rtc removeRoom failed", err);
@@ -713,6 +826,7 @@
     try {
       await withDbStep("Clear messages", () => db.ref(roomPath("messages")).remove());
       await withDbStep("Refresh room activity", () => touchRoomActivity(db, { force: true }));
+      await withDbStep("Sync room index", () => syncRoomIndexFromLifecycle(db, normalized));
       await withDbStep("Set rejoin presence", () => setupPresence(db));
       subscribeRelayListeners(db);
       startKeepalive();
@@ -743,6 +857,7 @@
         db.ref(`rooms/${prevRoomCode}/lastActiveAt`).set(nowMs).catch(() => {});
         db.ref(`rooms/${prevRoomCode}/expiresAt`).set(nowMs + ROOM_TTL_MS).catch(() => {});
         db.ref(`rooms/${prevRoomCode}/updatedAt`).set(nowMs).catch(() => {});
+        touchRoomIndexActivity(db, prevRoomCode, nowMs).catch(() => {});
       }
     } catch (_err) {
       // Ignore cleanup errors on close.
@@ -778,6 +893,7 @@
     };
     try {
       await db.ref(`rooms/${targetRoomCode}`).update(payload);
+      await syncRoomIndexFromLifecycle(db, targetRoomCode);
       if (targetRoomCode === roomCode) {
         lastRoomActivityTouchAt = nowMs;
       }
@@ -834,12 +950,36 @@
     writeAbandoned,
     removeRoom,
     rejoinRoom,
+    async readRoomIndex(inputRoomCode) {
+      const db = getDbOrThrow();
+      await waitForAuthUser();
+      const normalized = normalizeRoomCode(inputRoomCode);
+      if (!normalized) return null;
+      return readRoomIndexInternal(db, normalized);
+    },
     async readRoomLifecycleMetadata(inputRoomCode) {
       const db = getDbOrThrow();
       await waitForAuthUser();
       const normalized = normalizeRoomCode(inputRoomCode);
       if (!normalized) return null;
       return readRoomLifecycleMetadataInternal(db, normalized);
+    },
+    async readSelfMemberRole(inputRoomCode) {
+      const db = getDbOrThrow();
+      const authUser = await waitForAuthUser();
+      const normalized = normalizeRoomCode(inputRoomCode);
+      if (!normalized || !authUser?.uid) return null;
+      try {
+        const snapshot = await db.ref(`rooms/${normalized}/memberMap/${authUser.uid}`).once("value");
+        const raw = String(snapshot?.val() || "").trim().toLowerCase();
+        if (raw === "host" || raw === "guest") {
+          return raw;
+        }
+        return null;
+      } catch (err) {
+        console.warn("rtc readSelfMemberRole failed", { roomCode: normalized, err });
+        return null;
+      }
     },
     onStatusChange,
     onHeartbeat,

@@ -332,7 +332,12 @@ function init() {
       const reconnectResult = await attemptOnlineResumeOnLoad();
       if (!reconnectResult.resumed) {
         showStartMenu();
-        if (reconnectResult.notice) {
+        if (reconnectResult.openOnlinePanel) {
+          await getOnlineStartController().onStartModeOnlineFromMenu();
+          if (reconnectResult.notice) {
+            getOnlineStartController().setStartOnlineStatus(reconnectResult.notice, reconnectResult.noticeIsError !== false);
+          }
+        } else if (reconnectResult.notice) {
           setCodeStatus(reconnectResult.notice, false, "start");
         }
         const loadedFromHash = tryLoadFromLocationHash();
@@ -360,17 +365,66 @@ function normalizeOnlineRoleValue(rawRole) {
   return rawRole === "host" || rawRole === "guest" ? rawRole : null;
 }
 
+function normalizeOnlineInviteRoomId(rawRoomId) {
+  return String(rawRoomId || "")
+    .trim()
+    .toUpperCase();
+}
+
+function writeOnlineInviteUrl(roomCode, options = {}) {
+  const normalizedRoomCode = normalizeOnlineInviteRoomId(roomCode);
+  if (!ONLINE_ROOM_CODE_REGEX.test(normalizedRoomCode)) return false;
+  const replace = options.replace === true;
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("join", normalizedRoomCode);
+    url.searchParams.delete("room");
+    url.searchParams.delete("role");
+    const query = url.searchParams.toString();
+    const nextUrl = `${url.pathname}${query ? `?${query}` : ""}${url.hash || ""}`;
+    if (replace) {
+      window.history.replaceState({}, "", nextUrl);
+    } else {
+      window.history.pushState({}, "", nextUrl);
+    }
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function buildOnlineInviteLink(roomCode) {
+  const normalizedRoomCode = normalizeOnlineInviteRoomId(roomCode);
+  if (!ONLINE_ROOM_CODE_REGEX.test(normalizedRoomCode)) return "";
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("join", normalizedRoomCode);
+    url.searchParams.delete("room");
+    url.searchParams.delete("role");
+    url.hash = "";
+    return url.toString();
+  } catch (_err) {
+    return "";
+  }
+}
+
+function normalizeLegacyOnlineUrlToInvite(roomCode) {
+  return writeOnlineInviteUrl(roomCode, { replace: true });
+}
+
 function readOnlineSessionContextFromUrl() {
   try {
     const params = new URLSearchParams(window.location.search || "");
-    const roomCode = String(params.get("room") || "")
-      .trim()
-      .toUpperCase();
-    const role = normalizeOnlineRoleValue(String(params.get("role") || "").trim().toLowerCase());
-    if (!ONLINE_ROOM_CODE_REGEX.test(roomCode) || !role) {
-      return null;
+    const joinRoomCode = normalizeOnlineInviteRoomId(params.get("join"));
+    if (ONLINE_ROOM_CODE_REGEX.test(joinRoomCode)) {
+      return { roomCode: joinRoomCode, source: "join", legacyRole: null };
     }
-    return { roomCode, role };
+    const legacyRoomCode = normalizeOnlineInviteRoomId(params.get("room"));
+    if (ONLINE_ROOM_CODE_REGEX.test(legacyRoomCode)) {
+      const legacyRole = normalizeOnlineRoleValue(String(params.get("role") || "").trim().toLowerCase());
+      return { roomCode: legacyRoomCode, source: "legacy", legacyRole };
+    }
+    return null;
   } catch (_err) {
     return null;
   }
@@ -392,9 +446,7 @@ function readOnlineSessionContextFromStorage() {
 }
 
 function persistOnlineSessionContext(roomCode, role) {
-  const normalizedRoomCode = String(roomCode || "")
-    .trim()
-    .toUpperCase();
+  const normalizedRoomCode = normalizeOnlineInviteRoomId(roomCode);
   const normalizedRole = normalizeOnlineRoleValue(String(role || "").trim().toLowerCase());
   if (!ONLINE_ROOM_CODE_REGEX.test(normalizedRoomCode) || !normalizedRole) return;
   try {
@@ -403,15 +455,7 @@ function persistOnlineSessionContext(roomCode, role) {
   } catch (_err) {
     // Ignore storage failures.
   }
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.set("room", normalizedRoomCode);
-    url.searchParams.set("role", normalizedRole);
-    const nextUrl = `${url.pathname}?${url.searchParams.toString()}${url.hash || ""}`;
-    window.history.pushState({}, "", nextUrl);
-  } catch (_err) {
-    // Ignore URL update failures.
-  }
+  writeOnlineInviteUrl(normalizedRoomCode);
 }
 
 function clearOnlineSessionContext() {
@@ -423,14 +467,15 @@ function clearOnlineSessionContext() {
   }
   try {
     const url = new URL(window.location.href);
-    if (!url.searchParams.has("room") && !url.searchParams.has("role")) {
+    if (!url.searchParams.has("join") && !url.searchParams.has("room") && !url.searchParams.has("role")) {
       return;
     }
+    url.searchParams.delete("join");
     url.searchParams.delete("room");
     url.searchParams.delete("role");
     const query = url.searchParams.toString();
     const nextUrl = `${url.pathname}${query ? `?${query}` : ""}${url.hash || ""}`;
-    window.history.pushState({}, "", nextUrl);
+    window.history.replaceState({}, "", nextUrl);
   } catch (_err) {
     // Ignore URL cleanup failures.
   }
@@ -485,6 +530,7 @@ let currentGamesRefreshToken = 0;
 let currentGamesResumeInFlight = false;
 let currentGamesDeleteInFlight = false;
 const currentGamesHandCountCache = new Map();
+const currentGamesOnlineEntriesById = new Map();
 let startModeMenuMode = null;
 let startModeLoadActive = false;
 
@@ -588,19 +634,14 @@ function getOnlineStartController() {
     debugOnlineInit,
     describeTurnOwnerForDebug,
     renderAll,
-    beginOnlineFriendMatch,
-    tryDecodeRtcSignal,
-    handleIncomingRtcSignal,
-    loadCodeIntoGame,
+    handleIncomingRtcPayload,
     setFriendInterstitialOpen,
     setFriendInterstitialStatus,
-    isFriendMode,
-    applyOnlineWaitingStateFromCurrentTurn,
-    handleOnlineReconnect,
     persistOnlineSessionContext,
+    buildOnlineInviteLink,
+    normalizeLegacyOnlineUrlToInvite,
     readOnlineSessionContextFromUrl,
     readOnlineSessionContextFromStorage,
-    clearOnlineSessionContext,
     onlineRoomCodeLength: ONLINE_ROOM_CODE_LENGTH,
     onlineRoomCodeRegex: ONLINE_ROOM_CODE_REGEX,
     onlineAuthReadyTimeoutMs: ONLINE_AUTH_READY_TIMEOUT_MS,
@@ -823,7 +864,7 @@ function normalizeStartModeMenuMode(mode) {
 }
 
 function getStartModeMenuTitle(mode) {
-  if (mode === "cpu") return "Play with CPU";
+  if (mode === "cpu") return "Play CPU";
   if (mode === "local") return "Play Local";
   if (mode === "online") return "Play Online";
   return "Play Mode";
@@ -834,6 +875,16 @@ function getStartModeMenuButton(mode) {
   if (mode === "local") return ui.startModeFriendBtn || null;
   if (mode === "online") return ui.startModeOnlineBtn || null;
   return null;
+}
+
+function updateStartModeButtonStates() {
+  const panelOpen = Boolean(ui.startCurrentGamesPanel && !ui.startCurrentGamesPanel.hidden);
+  const activeMode = panelOpen ? normalizeStartModeMenuMode(startModeMenuMode) : null;
+  if (ui.startModeCpuBtn) ui.startModeCpuBtn.classList.toggle("primary", activeMode === "cpu");
+  if (ui.startModeFriendBtn) ui.startModeFriendBtn.classList.toggle("primary", activeMode === "local");
+  if (ui.startModeOnlineBtn) ui.startModeOnlineBtn.classList.toggle("primary", activeMode === "online");
+  if (ui.startModeNewBtn) ui.startModeNewBtn.classList.toggle("primary", panelOpen && !startModeLoadActive);
+  if (ui.startModeLoadBtn) ui.startModeLoadBtn.classList.toggle("primary", panelOpen && startModeLoadActive);
 }
 
 function compareCurrentGamesMatches(a, b) {
@@ -866,6 +917,7 @@ function formatCurrentGamesUpdatedAt(timestamp) {
 function formatCurrentGamesModeLabel(mode) {
   if (mode === "cpu") return "CPU";
   if (mode === "local") return "Local";
+  if (mode === "online") return "Online";
   return "Other";
 }
 
@@ -878,6 +930,13 @@ function formatCurrentGamesStatusLabel(status) {
 }
 
 function buildCurrentGamesStatusMeta(savedMatch, p0Label, p1Label) {
+  if (savedMatch?.mode === "online" && savedMatch?.finished !== true) {
+    const role = savedMatch?.resumeRole === "host" ? "Host" : savedMatch?.resumeRole === "guest" ? "Guest" : "Player";
+    return {
+      text: `Resume as ${role}`,
+      className: "",
+    };
+  }
   if (savedMatch?.mode === "local" && savedMatch?.finished !== true) {
     if (savedMatch.turnOwner === 0) {
       return {
@@ -899,6 +958,7 @@ function buildCurrentGamesStatusMeta(savedMatch, p0Label, p1Label) {
 }
 
 function getCurrentTurnHandCountFromSavedMatch(savedMatch) {
+  if (savedMatch?.mode === "online") return null;
   const turnOwner = savedMatch?.turnOwner;
   if (turnOwner !== 0 && turnOwner !== 1) return null;
   const cacheKey = `${savedMatch.id}:${savedMatch.updatedAt}`;
@@ -917,6 +977,89 @@ function getCurrentTurnHandCountFromSavedMatch(savedMatch) {
   }
   currentGamesHandCountCache.set(cacheKey, handCount);
   return handCount;
+}
+
+function normalizeOnlineResumeRole(role) {
+  return role === "host" || role === "guest" ? role : null;
+}
+
+function buildOnlineCurrentGamesEntryId(roomCode, role) {
+  return `online-${roomCode}-${role}`;
+}
+
+function buildOnlineCurrentGamesEntry(roomCode, role, roomIndex = null) {
+  const normalizedRoomCode = normalizeOnlineInviteRoomId(roomCode);
+  const normalizedRole = normalizeOnlineResumeRole(role) || "host";
+  const updatedAt = Number(roomIndex?.updatedAt || Date.now());
+  const joinState = String(roomIndex?.joinState || "").trim().toLowerCase();
+  const waitingForGuest = normalizedRole === "host" && joinState === "open";
+  return {
+    id: buildOnlineCurrentGamesEntryId(normalizedRoomCode, normalizedRole),
+    mode: "online",
+    title: "Online Match",
+    playerNames: ["You", "Opponent"],
+    round: 1,
+    scoreSnapshot: { p0: 0, p1: 0 },
+    turnOwner: null,
+    status: waitingForGuest ? "waiting" : "your-turn",
+    updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? Math.floor(updatedAt) : Date.now(),
+    finished: false,
+    gameSnapshot: "online-session-context",
+    roomCode: normalizedRoomCode,
+    resumeRole: normalizedRole,
+  };
+}
+
+async function listOnlineCurrentGamesEntries() {
+  currentGamesOnlineEntriesById.clear();
+  const storedContext = readOnlineSessionContextFromStorage();
+  if (!storedContext) return [];
+  const roomCode = normalizeOnlineInviteRoomId(storedContext.roomCode);
+  if (!ONLINE_ROOM_CODE_REGEX.test(roomCode)) {
+    clearOnlineSessionContext();
+    return [];
+  }
+
+  let resumeRole = normalizeOnlineResumeRole(storedContext.role);
+  let roomIndex = null;
+  const rtc = getRtcBridge();
+  if (rtc && typeof rtc.readRoomIndex === "function") {
+    try {
+      roomIndex = await rtc.readRoomIndex(roomCode);
+    } catch (err) {
+      console.warn("[current-games] online roomIndex read failed", err);
+    }
+  }
+  if (rtc && typeof rtc.readSelfMemberRole === "function") {
+    try {
+      const selfRole = await rtc.readSelfMemberRole(roomCode);
+      if (selfRole === "host" || selfRole === "guest") {
+        resumeRole = selfRole;
+      }
+    } catch (err) {
+      console.warn("[current-games] online self member role read failed", err);
+    }
+  }
+
+  const joinState = String(roomIndex?.joinState || "").trim().toLowerCase();
+  const expiresAt = Number(roomIndex?.expiresAt || 0);
+  const expiredByTime = Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now();
+  const missingHost = roomIndex && roomIndex.exists === true && roomIndex.hasHost !== true;
+  if (joinState === "expired" || joinState === "closed" || expiredByTime || missingHost) {
+    clearOnlineSessionContext();
+    return [];
+  }
+  if (!resumeRole) {
+    clearOnlineSessionContext();
+    return [];
+  }
+  if (storedContext.role !== resumeRole) {
+    persistOnlineSessionContext(roomCode, resumeRole);
+  }
+
+  const entry = buildOnlineCurrentGamesEntry(roomCode, resumeRole, roomIndex);
+  currentGamesOnlineEntriesById.set(entry.id, entry);
+  return [entry];
 }
 
 function setStartCurrentGamesStatus(message, isError = false) {
@@ -961,11 +1104,22 @@ function buildCurrentGamesCard(savedMatch) {
   const names = Array.isArray(savedMatch.playerNames) ? savedMatch.playerNames.filter(Boolean) : [];
   const title = String(savedMatch.title || (savedMatch.mode === "cpu" ? CPU_SAVE_TITLE : LOCAL_SAVE_TITLE)).trim();
   const isLocalCard = savedMatch.mode === "local";
-  if (!isLocalCard) {
+  const isOnlineCard = savedMatch.mode === "online";
+  if (!isLocalCard && !isOnlineCard) {
     const main = document.createElement("div");
     main.className = "current-games-main";
     main.textContent = names.length > 0 ? `${title} - ${names.join(" vs ")}` : title;
     button.appendChild(main);
+  }
+  if (isOnlineCard) {
+    const main = document.createElement("div");
+    main.className = "current-games-main";
+    main.textContent = title || "Online Match";
+    button.appendChild(main);
+    const roomMeta = document.createElement("div");
+    roomMeta.className = "current-games-room";
+    roomMeta.textContent = `Room ${String(savedMatch.roomCode || "----------").trim().toUpperCase()}`;
+    button.appendChild(roomMeta);
   }
 
   const roundValue = Number(savedMatch.round || 1);
@@ -974,21 +1128,23 @@ function buildCurrentGamesCard(savedMatch) {
   const p1 = Number(savedMatch.scoreSnapshot?.p1 || 0);
   const p0Label = names[0] || "P1";
   const p1Label = names[1] || "P2";
-  const scoreLine = document.createElement("div");
-  scoreLine.className = "current-games-score-line";
-  const p0Score = document.createElement("span");
-  p0Score.className = "current-games-score-p1";
-  p0Score.textContent = `${p0Label} Score ${p0}`;
-  const divider = document.createElement("span");
-  divider.className = "current-games-score-divider";
-  divider.textContent = "|";
-  const p1Score = document.createElement("span");
-  p1Score.className = "current-games-score-p2";
-  p1Score.textContent = `${p1Label} Score ${p1}`;
-  scoreLine.appendChild(p0Score);
-  scoreLine.appendChild(divider);
-  scoreLine.appendChild(p1Score);
-  button.appendChild(scoreLine);
+  if (!isOnlineCard) {
+    const scoreLine = document.createElement("div");
+    scoreLine.className = "current-games-score-line";
+    const p0Score = document.createElement("span");
+    p0Score.className = "current-games-score-p1";
+    p0Score.textContent = `${p0Label} Score ${p0}`;
+    const divider = document.createElement("span");
+    divider.className = "current-games-score-divider";
+    divider.textContent = "|";
+    const p1Score = document.createElement("span");
+    p1Score.className = "current-games-score-p2";
+    p1Score.textContent = `${p1Label} Score ${p1}`;
+    scoreLine.appendChild(p0Score);
+    scoreLine.appendChild(divider);
+    scoreLine.appendChild(p1Score);
+    button.appendChild(scoreLine);
+  }
 
   const turnHandCount = getCurrentTurnHandCountFromSavedMatch(savedMatch);
 
@@ -1004,15 +1160,22 @@ function buildCurrentGamesCard(savedMatch) {
   statusRow.appendChild(status);
   const side = document.createElement("div");
   side.className = "current-games-side";
-  const month = document.createElement("div");
-  month.className = "current-games-month";
-  month.textContent = monthName;
-  side.appendChild(month);
-  if (turnHandCount !== null && savedMatch.status !== "finished") {
-    const hand = document.createElement("div");
-    hand.className = "current-games-hand";
-    hand.textContent = `Hand ${turnHandCount}/8`;
-    side.appendChild(hand);
+  if (!isOnlineCard) {
+    const month = document.createElement("div");
+    month.className = "current-games-month";
+    month.textContent = monthName;
+    side.appendChild(month);
+    if (turnHandCount !== null && savedMatch.status !== "finished") {
+      const hand = document.createElement("div");
+      hand.className = "current-games-hand";
+      hand.textContent = `Hand ${turnHandCount}/8`;
+      side.appendChild(hand);
+    }
+  } else {
+    const roleMeta = document.createElement("div");
+    roleMeta.className = "current-games-month";
+    roleMeta.textContent = savedMatch.resumeRole === "host" ? "Host seat" : "Guest seat";
+    side.appendChild(roleMeta);
   }
   statusRow.appendChild(side);
   button.appendChild(statusRow);
@@ -1047,6 +1210,7 @@ async function refreshCurrentGamesPanel() {
   const panelNode = ui.startCurrentGamesPanel;
   if (!panelNode) return;
   if (!startModeLoadActive) {
+    currentGamesOnlineEntriesById.clear();
     if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
     if (ui.startCurrentGamesEmpty) {
       ui.startCurrentGamesEmpty.hidden = true;
@@ -1057,16 +1221,22 @@ async function refreshCurrentGamesPanel() {
   }
   const normalizedMode = normalizeStartModeMenuMode(startModeMenuMode);
   if (!normalizedMode) return;
+  const token = ++currentGamesRefreshToken;
   if (normalizedMode === "online") {
-    if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
-    if (ui.startCurrentGamesEmpty) {
-      ui.startCurrentGamesEmpty.hidden = false;
-      ui.startCurrentGamesEmpty.textContent = "Online saved matches will appear here in a later update.";
+    setStartCurrentGamesStatus("Loading...", false);
+    try {
+      const onlineMatches = await listOnlineCurrentGamesEntries();
+      if (token !== currentGamesRefreshToken) return;
+      renderCurrentGamesList(onlineMatches);
+      setStartCurrentGamesStatus("", false);
+    } catch (err) {
+      if (token !== currentGamesRefreshToken) return;
+      console.warn("[current-games] Failed to read online resume matches.", err);
+      renderCurrentGamesList([]);
+      setStartCurrentGamesStatus("Could not load online resumes. Try again.", true);
     }
-    setStartCurrentGamesStatus("", false);
     return;
   }
-  const token = ++currentGamesRefreshToken;
   const saves = getSavesBridge();
   if (!saves) {
     renderCurrentGamesList([]);
@@ -1116,7 +1286,9 @@ function setStartCurrentGamesPanelOpen(open, mode = null) {
   }
   if (ui.startModeNewBtn) ui.startModeNewBtn.disabled = !shouldOpen;
   if (ui.startModeLoadBtn) ui.startModeLoadBtn.disabled = !shouldOpen;
+  updateStartModeButtonStates();
   if (!shouldOpen) {
+    currentGamesOnlineEntriesById.clear();
     if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
     if (ui.startCurrentGamesEmpty) {
       ui.startCurrentGamesEmpty.hidden = true;
@@ -1162,6 +1334,7 @@ function onStartModeLoadGame() {
   const mode = normalizeStartModeMenuMode(startModeMenuMode);
   if (!mode) return;
   startModeLoadActive = !startModeLoadActive;
+  updateStartModeButtonStates();
   void refreshCurrentGamesPanel();
 }
 
@@ -1169,7 +1342,43 @@ async function resumeSavedMatchFromCurrentGames(matchId) {
   const resumeId = String(matchId || "").trim();
   if (!resumeId || currentGamesResumeInFlight || currentGamesDeleteInFlight) return;
   const mode = normalizeStartModeMenuMode(startModeMenuMode);
-  if (!mode || mode === "online") return;
+  if (!mode) return;
+  if (mode === "online") {
+    const onlineEntry = currentGamesOnlineEntriesById.get(resumeId);
+    if (!onlineEntry) {
+      setStartCurrentGamesStatus("That online game is no longer available.", true);
+      await refreshCurrentGamesPanel();
+      return;
+    }
+    currentGamesResumeInFlight = true;
+    setCurrentGamesCardsDisabled(true);
+    setStartCurrentGamesStatus("Resuming...", false);
+    try {
+      await handleOnlineReconnect(onlineEntry.roomCode, onlineEntry.resumeRole);
+      setStartCurrentGamesStatus("", false);
+    } catch (err) {
+      console.warn(`[current-games] Could not resume online match ${resumeId}.`, err);
+      const message = String(err?.message || "").toLowerCase();
+      if (
+        message.includes("expired") ||
+        message.includes("closed") ||
+        message.includes("not found") ||
+        message.includes("rejoin denied")
+      ) {
+        clearOnlineSessionContext();
+        setStartCurrentGamesStatus("This online game is no longer available.", true);
+      } else {
+        setStartCurrentGamesStatus("Could not resume online game. Try again.", true);
+      }
+      await refreshCurrentGamesPanel();
+    } finally {
+      currentGamesResumeInFlight = false;
+      if (ui.startMenu && !ui.startMenu.hidden) {
+        setCurrentGamesCardsDisabled(false);
+      }
+    }
+    return;
+  }
   const saves = getSavesBridge();
   if (!saves) {
     setStartCurrentGamesStatus("Device saves are unavailable on this build.", true);
@@ -1216,9 +1425,40 @@ async function deleteSavedMatchFromCurrentGames(matchId) {
   const deleteId = String(matchId || "").trim();
   if (!deleteId || currentGamesDeleteInFlight || currentGamesResumeInFlight) return;
   const mode = normalizeStartModeMenuMode(startModeMenuMode);
-  if (!mode || mode === "online") return;
-  const confirmed = window.confirm("Delete this saved game from this device?");
+  if (!mode) return;
+  const confirmed = window.confirm(
+    mode === "online"
+      ? "Leave this online game and remove it from this device?"
+      : "Delete this saved game from this device?"
+  );
   if (!confirmed) return;
+  if (mode === "online") {
+    const onlineEntry = currentGamesOnlineEntriesById.get(deleteId);
+    currentGamesDeleteInFlight = true;
+    setCurrentGamesCardsDisabled(true);
+    setStartCurrentGamesStatus("Deleting...", false);
+    try {
+      if (onlineEntry) {
+        const rtc = getRtcBridge();
+        if (rtc && typeof rtc.writeAbandoned === "function") {
+          await rtc.writeAbandoned(onlineEntry.resumeRole, onlineEntry.roomCode);
+        }
+      }
+      clearOnlineSessionContext();
+      setStartCurrentGamesStatus("Online game removed from this device.", false);
+      await refreshCurrentGamesPanel();
+    } catch (err) {
+      console.warn(`[current-games] Could not delete online match ${deleteId}.`, err);
+      setStartCurrentGamesStatus("Could not remove online game. Try again.", true);
+      await refreshCurrentGamesPanel();
+    } finally {
+      currentGamesDeleteInFlight = false;
+      if (ui.startMenu && !ui.startMenu.hidden) {
+        setCurrentGamesCardsDisabled(false);
+      }
+    }
+    return;
+  }
   const saves = getSavesBridge();
   if (!saves) {
     setStartCurrentGamesStatus("Device saves are unavailable on this build.", true);
@@ -1705,10 +1945,6 @@ function cacheUI() {
   ui.startExpiredNote = document.getElementById("start-expired-note");
   ui.startExpiredNoteText = document.getElementById("start-expired-note-text");
   ui.startExpiredNoteClose = document.getElementById("start-expired-note-close");
-  ui.startResumeCard = document.getElementById("start-resume-card");
-  ui.startResumeText = document.getElementById("start-resume-text");
-  ui.startResumeBtn = document.getElementById("start-resume-btn");
-  ui.startResumeLeaveBtn = document.getElementById("start-resume-leave-btn");
   ui.startOnlinePanel = document.getElementById("start-online-panel");
   ui.onlineHostBtn = document.getElementById("online-host-btn");
   ui.onlineJoinBtn = document.getElementById("online-join-btn");
@@ -1717,6 +1953,9 @@ function cacheUI() {
   ui.onlineRoomCodeInput = document.getElementById("online-room-code-input");
   ui.onlineRoomDisplay = document.getElementById("online-room-display");
   ui.onlineRoomCodeText = document.getElementById("online-room-code-text");
+  ui.onlineInviteActions = document.getElementById("online-invite-actions");
+  ui.onlineCopyInviteBtn = document.getElementById("online-copy-invite-btn");
+  ui.onlineShareInviteBtn = document.getElementById("online-share-invite-btn");
   ui.startOnlineStatus = document.getElementById("start-online-status");
   ui.startLoadActions = document.getElementById("start-load-actions");
   ui.startLoadBtn = document.getElementById("start-load-btn");
@@ -1765,10 +2004,10 @@ function bindUI() {
   ui.startModeLoadBtn?.addEventListener("click", onStartModeLoadGame);
   ui.startCurrentGamesList?.addEventListener("click", onStartCurrentGamesListClick);
   ui.startExpiredNoteClose?.addEventListener("click", onStartExpiredNoteDismiss);
-  ui.startResumeBtn?.addEventListener("click", onStartResumeFromCard);
-  ui.startResumeLeaveBtn?.addEventListener("click", onStartResumeLeaveFromCard);
   ui.onlineHostBtn?.addEventListener("click", onOnlineHostFromMenu);
   ui.onlineJoinBtn?.addEventListener("click", onOnlineJoinFromMenu);
+  ui.onlineCopyInviteBtn?.addEventListener("click", onOnlineCopyInviteFromMenu);
+  ui.onlineShareInviteBtn?.addEventListener("click", onOnlineShareInviteFromMenu);
   ui.onlineBackBtn?.addEventListener("click", onOnlineBackFromMenu);
   ui.onlineRoomChip?.addEventListener("click", onOnlineRoomChipCopy);
   ui.onlineRoomCodeInput?.addEventListener("input", () => {
@@ -2106,20 +2345,20 @@ async function onOnlineJoinFromMenu() {
   return getOnlineStartController().onOnlineJoinFromMenu();
 }
 
+async function onOnlineCopyInviteFromMenu() {
+  return getOnlineStartController().onOnlineCopyInviteFromMenu();
+}
+
+async function onOnlineShareInviteFromMenu() {
+  return getOnlineStartController().onOnlineShareInviteFromMenu();
+}
+
 function onOnlineBackFromMenu() {
   return getOnlineStartController().onOnlineBackFromMenu();
 }
 
 function onStartExpiredNoteDismiss() {
   return getOnlineStartController().dismissStartExpiredNote();
-}
-
-async function onStartResumeFromCard() {
-  return getOnlineStartController().onStartResumeFromCard();
-}
-
-async function onStartResumeLeaveFromCard() {
-  return getOnlineStartController().onStartResumeLeaveFromCard();
 }
 
 async function startOnlineSession(role) {
@@ -2156,6 +2395,10 @@ async function onOnlineRoomChipCopy() {
 
 function handleIncomingRtcSignal(signal) {
   return getOnlineSessionController().handleIncomingRtcSignal(signal);
+}
+
+function handleIncomingRtcPayload(rawPayload) {
+  return getOnlineSessionController().handleIncomingRtcPayload(rawPayload);
 }
 
 function onStartLoadFromMenu() {
@@ -3946,8 +4189,16 @@ function endRoundDraw() {
       pointsAwarded: 0,
       noScore: true,
     });
-    if (!syncOnlineRoundTransitionSnapshot() && isOnlineFriendSessionActive()) {
-      addSystemLog("Round-end sync failed online. Waiting for automatic retry.");
+    if (isOnlineFriendSessionActive()) {
+      void Promise.resolve(syncOnlineRoundTransitionSnapshot())
+        .then((synced) => {
+          if (!synced) {
+            addSystemLog("Round-end sync failed online. Waiting for automatic retry.");
+          }
+        })
+        .catch(() => {
+          addSystemLog("Round-end sync failed online. Waiting for automatic retry.");
+        });
     }
     const nextMonth = describeMonthNameOnly(state.roundTransition.nextGameNumber);
     state.message = `Game End: No scorer. Next Game: ${nextMonth}.`;
@@ -4023,8 +4274,16 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
       pointsAwarded: scored,
       noScore: false,
     });
-    if (!syncOnlineRoundTransitionSnapshot() && isOnlineFriendSessionActive()) {
-      addSystemLog("Round-end sync failed online. Waiting for automatic retry.");
+    if (isOnlineFriendSessionActive()) {
+      void Promise.resolve(syncOnlineRoundTransitionSnapshot())
+        .then((synced) => {
+          if (!synced) {
+            addSystemLog("Round-end sync failed online. Waiting for automatic retry.");
+          }
+        })
+        .catch(() => {
+          addSystemLog("Round-end sync failed online. Waiting for automatic retry.");
+        });
     }
     const nextMonth = describeMonthNameOnly(state.roundTransition.nextGameNumber);
     state.message = `Game End: ${winner.name} wins ${scored}. Next Game: ${nextMonth}.`;

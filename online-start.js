@@ -10,72 +10,34 @@
       debugOnlineInit,
       describeTurnOwnerForDebug,
       renderAll,
-      beginOnlineFriendMatch,
-      tryDecodeRtcSignal,
-      handleIncomingRtcSignal,
-      loadCodeIntoGame,
+      handleIncomingRtcPayload,
       setFriendInterstitialOpen,
       setFriendInterstitialStatus,
-      isFriendMode,
-      applyOnlineWaitingStateFromCurrentTurn,
-      handleOnlineReconnect,
       persistOnlineSessionContext,
+      buildOnlineInviteLink,
+      normalizeLegacyOnlineUrlToInvite,
       readOnlineSessionContextFromUrl,
       readOnlineSessionContextFromStorage,
-      clearOnlineSessionContext,
       onlineRoomCodeLength,
       onlineRoomCodeRegex,
       onlineAuthReadyTimeoutMs,
       onlineHostCreateMaxAttempts,
     } = deps;
     let hostCreateInFlight = false;
-    let resumeCandidate = null;
-    let resumeInFlight = false;
-    let resumeRetryReady = false;
     let expiredRoomNotice = "";
     const ONLINE_AUTH_FAILURE_MESSAGE = "Online play is temporarily unavailable. Check your connection and reload.";
+    const INVITE_FAILURE_MESSAGES = {
+      invalid: "This invite link is not valid.",
+      expired: "This game has ended. Ask your friend to create a new one.",
+      full: "This game already has two players.",
+      alreadyJoined: "You already joined this game on this device. Open Play Online, then Load Game to resume.",
+    };
 
     function setOnlineAuthState(nextState, message = "") {
       const normalized = nextState === "ready" ? "ready" : nextState === "error" ? "error" : "pending";
       state.onlineAuthState = normalized;
       state.onlineAuthMessage = String(message || "");
       applyOnlineAuthUiState();
-    }
-
-    function formatTimeAgo(timestamp) {
-      const value = Number(timestamp || 0);
-      if (!Number.isFinite(value) || value <= 0) return "just now";
-      const elapsedMs = Math.max(0, Date.now() - value);
-      if (elapsedMs < 60_000) return "just now";
-      const minutes = Math.floor(elapsedMs / 60_000);
-      if (minutes < 60) return `${minutes}m ago`;
-      const hours = Math.floor(minutes / 60);
-      if (hours < 48) return `${hours}h ago`;
-      const days = Math.floor(hours / 24);
-      return `${days}d ago`;
-    }
-
-    function renderStartResumeCard() {
-      if (!ui.startResumeCard) return;
-      const startMenuVisible = Boolean(ui.startMenu && !ui.startMenu.hidden);
-      const onlinePanelVisible = Boolean(ui.startOnlinePanel && !ui.startOnlinePanel.hidden);
-      const activeCandidate = resumeCandidate;
-      const canShow = startMenuVisible && !onlinePanelVisible && Boolean(activeCandidate);
-      ui.startResumeCard.hidden = !canShow;
-      if (!canShow) return;
-      const timeAgo = formatTimeAgo(activeCandidate.lastActiveAt);
-      if (ui.startResumeText) {
-        const roomText = String(activeCandidate.roomCode || "----------");
-        ui.startResumeText.textContent = `Active game - Room ${roomText} - Last played ${timeAgo}`;
-      }
-      if (ui.startResumeBtn) {
-        ui.startResumeBtn.disabled = resumeInFlight;
-        ui.startResumeBtn.textContent = resumeInFlight ? "Resuming..." : resumeRetryReady ? "Try Again" : "Resume";
-      }
-      if (ui.startResumeLeaveBtn) {
-        ui.startResumeLeaveBtn.disabled = resumeInFlight;
-        ui.startResumeLeaveBtn.textContent = "Leave Game";
-      }
     }
 
     function renderStartExpiredNote() {
@@ -89,28 +51,7 @@
     }
 
     function refreshStartMenuAsyncUx() {
-      renderStartResumeCard();
       renderStartExpiredNote();
-    }
-
-    function setResumeCandidate(nextCandidate) {
-      resumeCandidate = nextCandidate
-        ? {
-            roomCode: String(nextCandidate.roomCode || "")
-              .trim()
-              .toUpperCase(),
-            role: nextCandidate.role === "host" || nextCandidate.role === "guest" ? nextCandidate.role : "host",
-            lastActiveAt: Number(nextCandidate.lastActiveAt || 0) || Date.now(),
-          }
-        : null;
-      if (resumeCandidate) {
-        resumeRetryReady = false;
-      }
-      if (!resumeCandidate) {
-        resumeInFlight = false;
-        resumeRetryReady = false;
-      }
-      refreshStartMenuAsyncUx();
     }
 
     function setExpiredRoomNotice(message = "") {
@@ -212,6 +153,90 @@
         .slice(0, onlineRoomCodeLength);
     }
 
+    function isValidRoomCode(roomCode) {
+      return onlineRoomCodeRegex.test(String(roomCode || "").trim().toUpperCase());
+    }
+
+    function getInviteFailureMessage(reason) {
+      if (reason === "expired") return INVITE_FAILURE_MESSAGES.expired;
+      if (reason === "full") return INVITE_FAILURE_MESSAGES.full;
+      if (reason === "already-joined") return INVITE_FAILURE_MESSAGES.alreadyJoined;
+      return INVITE_FAILURE_MESSAGES.invalid;
+    }
+
+    function classifyInviteFailureFromError(err) {
+      const message = String(err?.message || err || "").toLowerCase();
+      if (
+        message.includes("not valid") ||
+        message.includes("not found") ||
+        message.includes("missing room code") ||
+        message.includes("host room not found")
+      ) {
+        return "invalid";
+      }
+      if (message.includes("expired") || message.includes("closed") || message.includes("ended")) {
+        return "expired";
+      }
+      if (message.includes("full") || message.includes("two players")) {
+        return "full";
+      }
+      return null;
+    }
+
+    function classifyInviteFailureFromRoomIndex(roomIndex, selfRole) {
+      if (selfRole === "host" || selfRole === "guest") {
+        return "already-joined";
+      }
+      // Transitional compatibility: if roomIndex is missing/unreadable, attempt join once
+      // and let join errors classify the failure. This keeps legacy/partial deployments usable.
+      if (!roomIndex || roomIndex.exists !== true) {
+        return null;
+      }
+      if (!roomIndex.hasHost) {
+        return "invalid";
+      }
+      if (roomIndex.joinState === "expired" || roomIndex.joinState === "closed") {
+        return "expired";
+      }
+      const expiresAt = Number(roomIndex.expiresAt || 0);
+      if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) {
+        return "expired";
+      }
+      if (roomIndex.joinState === "full" || roomIndex.hasGuest) {
+        return "full";
+      }
+      return null;
+    }
+
+    function getInviteLinkForRoom(roomCode) {
+      if (typeof buildOnlineInviteLink !== "function") return "";
+      const normalized = String(roomCode || "")
+        .trim()
+        .toUpperCase();
+      if (!isValidRoomCode(normalized)) return "";
+      return String(buildOnlineInviteLink(normalized) || "");
+    }
+
+    function setInviteActionsVisible(visible) {
+      if (ui.onlineInviteActions) {
+        ui.onlineInviteActions.hidden = !visible;
+      }
+      if (ui.onlineCopyInviteBtn) {
+        ui.onlineCopyInviteBtn.disabled = !visible;
+      }
+      if (ui.onlineShareInviteBtn) {
+        const shareSupported = typeof navigator.share === "function";
+        ui.onlineShareInviteBtn.hidden = !shareSupported;
+        ui.onlineShareInviteBtn.disabled = !visible || !shareSupported;
+      }
+    }
+
+    function refreshInviteActions() {
+      const hostMode = state.startOnlineMode !== "join";
+      const link = getInviteLinkForRoom(state.rtcRoomCode);
+      setInviteActionsVisible(hostMode && Boolean(link));
+    }
+
     function isOnlineRoomCodeCollisionError(err) {
       const message = String(err?.message || err || "");
       return message.includes("Room code already in use");
@@ -250,6 +275,7 @@
         ui.onlineJoinBtn.classList.toggle("primary", !hostMode);
       }
       setStartOnlineRoomDisplay(state.rtcRoomCode || "");
+      refreshInviteActions();
       applyOnlineAuthUiState();
     }
 
@@ -261,6 +287,7 @@
       if (ui.onlineRoomCodeText) {
         ui.onlineRoomCodeText.textContent = roomCode || "----------";
       }
+      refreshInviteActions();
     }
 
     function setStartOnlinePanelOpen(open) {
@@ -285,6 +312,7 @@
         if (ui.onlineRoomCodeInput) {
           ui.onlineRoomCodeInput.value = "";
         }
+        setInviteActionsVisible(false);
       }
       applyOnlineAuthUiState();
       refreshStartMenuAsyncUx();
@@ -329,57 +357,94 @@
 
     async function attemptOnlineResumeOnLoad() {
       const rtc = getRtcBridge();
-      const fromUrl =
-        typeof readOnlineSessionContextFromUrl === "function" ? readOnlineSessionContextFromUrl() : null;
-      if (fromUrl && typeof handleOnlineReconnect === "function") {
-        try {
-          setResumeCandidate(null);
-          setExpiredRoomNotice("");
-          await handleOnlineReconnect(fromUrl.roomCode, fromUrl.role);
-          return { resumed: true, notice: "" };
-        } catch (err) {
-          console.warn("online-start URL rejoin failed", err);
-          const message = String(err?.message || "").toLowerCase();
-          resetRtcSession({ closeConnection: true });
-          if (typeof clearOnlineSessionContext === "function") {
-            clearOnlineSessionContext();
-          }
-          if (message.includes("expired") || message.includes("not found") || message.includes("closed")) {
-            setExpiredRoomNotice("This game has expired.");
-            return { resumed: false, notice: "" };
-          }
-          setExpiredRoomNotice("");
-          return { resumed: false, notice: "Could not rejoin that online game." };
+      const fromUrl = typeof readOnlineSessionContextFromUrl === "function" ? readOnlineSessionContextFromUrl() : null;
+      if (fromUrl) {
+        const inviteRoomCode = String(fromUrl.roomCode || "")
+          .trim()
+          .toUpperCase();
+        if (!isValidRoomCode(inviteRoomCode)) {
+          return {
+            resumed: false,
+            notice: getInviteFailureMessage("invalid"),
+            noticeIsError: true,
+            openOnlinePanel: true,
+          };
         }
+        if (fromUrl.source === "legacy" && typeof normalizeLegacyOnlineUrlToInvite === "function") {
+          normalizeLegacyOnlineUrlToInvite(inviteRoomCode);
+        }
+        setExpiredRoomNotice("");
+
+        if (!rtc || typeof rtc.readRoomIndex !== "function" || typeof rtc.joinRoom !== "function") {
+          return {
+            resumed: false,
+            notice: "Online mode unavailable: RTC bridge not loaded.",
+            noticeIsError: true,
+            openOnlinePanel: true,
+          };
+        }
+
+        let roomIndex = null;
+        let selfRole = null;
+        try {
+          roomIndex = await rtc.readRoomIndex(inviteRoomCode);
+        } catch (err) {
+          console.warn("online-start invite roomIndex read failed", err);
+        }
+        if (typeof rtc.readSelfMemberRole === "function") {
+          try {
+            selfRole = await rtc.readSelfMemberRole(inviteRoomCode);
+          } catch (err) {
+            console.warn("online-start invite member role read failed", err);
+          }
+        }
+        if (selfRole !== "host" && selfRole !== "guest") {
+          const existingStorage =
+            typeof readOnlineSessionContextFromStorage === "function" ? readOnlineSessionContextFromStorage() : null;
+          if (existingStorage && existingStorage.roomCode === inviteRoomCode && existingStorage.role) {
+            selfRole = existingStorage.role;
+          }
+        }
+
+        const inviteFailure = classifyInviteFailureFromRoomIndex(roomIndex, selfRole);
+        if (inviteFailure === "already-joined") {
+          if (selfRole === "host" || selfRole === "guest") {
+            if (typeof persistOnlineSessionContext === "function") {
+              persistOnlineSessionContext(inviteRoomCode, selfRole);
+            }
+          }
+          return {
+            resumed: false,
+            notice: getInviteFailureMessage("already-joined"),
+            noticeIsError: false,
+            openOnlinePanel: false,
+          };
+        }
+        if (inviteFailure) {
+          return {
+            resumed: false,
+            notice: getInviteFailureMessage(inviteFailure),
+            noticeIsError: true,
+            openOnlinePanel: true,
+          };
+        }
+
+        const joined = await startOnlineSession("guest", {
+          roomCodeOverride: inviteRoomCode,
+          source: "invite-link",
+        });
+        if (joined) {
+          return { resumed: true, notice: "", noticeIsError: false, openOnlinePanel: false };
+        }
+        return {
+          resumed: false,
+          notice: ui.startOnlineStatus?.textContent || "Could not join that invite.",
+          noticeIsError: true,
+          openOnlinePanel: true,
+        };
       }
 
-      const fromStorage =
-        typeof readOnlineSessionContextFromStorage === "function" ? readOnlineSessionContextFromStorage() : null;
-      if (fromStorage && rtc && typeof rtc.readRoomLifecycleMetadata === "function") {
-        try {
-          const metadata = await rtc.readRoomLifecycleMetadata(fromStorage.roomCode);
-          const expiresAt = Number(metadata?.expiresAt || 0);
-          const abandoned = Boolean(metadata?.abandoned);
-          if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() || abandoned) {
-            if (typeof clearOnlineSessionContext === "function") {
-              clearOnlineSessionContext();
-            }
-            setResumeCandidate(null);
-          } else {
-            setResumeCandidate({
-              roomCode: fromStorage.roomCode,
-              role: fromStorage.role,
-              lastActiveAt: Number(metadata?.lastActiveAt || metadata?.updatedAt || Date.now()),
-            });
-          }
-        } catch (err) {
-          console.warn("online-start storage lifecycle check failed", err);
-          setResumeCandidate(null);
-        }
-      } else {
-        setResumeCandidate(null);
-      }
-      return { resumed: false, notice: "" };
+      return { resumed: false, notice: "", noticeIsError: false, openOnlinePanel: false };
     }
 
     async function onStartModeOnlineFromMenu() {
@@ -392,10 +457,7 @@
         return;
       }
       if (!ensureOnlineAuthReadyForStart()) return;
-      setStartOnlineStatus(
-        "Tap Host New Room to create and share a room code, or tap Join Room to switch to code entry.",
-        false
-      );
+      setStartOnlineStatus("Create a room and share the invite link.", false);
     }
 
     async function onOnlineHostFromMenu() {
@@ -420,10 +482,64 @@
       if (state.startOnlineMode !== "join") {
         resetRtcSession({ closeConnection: true });
         setStartOnlinePanelMode("join");
-        setStartOnlineStatus("Enter your friend's room code, then tap Join Room again.", false);
+        setStartOnlineStatus("Enter the invite room code, then tap Join by Code again.", false);
         return;
       }
       await startOnlineSession("guest");
+    }
+
+    async function onOnlineCopyInviteFromMenu() {
+      const inviteLink = getInviteLinkForRoom(state.rtcRoomCode);
+      if (!inviteLink) {
+        setStartOnlineStatus("Create a room first to get an invite link.", true);
+        return;
+      }
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(inviteLink);
+        } else if (document?.execCommand) {
+          const ghostInput = document.createElement("textarea");
+          ghostInput.value = inviteLink;
+          ghostInput.setAttribute("readonly", "");
+          ghostInput.style.position = "absolute";
+          ghostInput.style.left = "-9999px";
+          document.body.appendChild(ghostInput);
+          ghostInput.select();
+          document.execCommand("copy");
+          document.body.removeChild(ghostInput);
+        } else {
+          throw new Error("Clipboard unavailable");
+        }
+        setStartOnlineStatus("Invite link copied.", false);
+      } catch (err) {
+        console.warn("online-start invite copy failed", err);
+        setStartOnlineStatus("Could not copy invite link. Try again.", true);
+      }
+    }
+
+    async function onOnlineShareInviteFromMenu() {
+      const inviteLink = getInviteLinkForRoom(state.rtcRoomCode);
+      if (!inviteLink) {
+        setStartOnlineStatus("Create a room first to share an invite.", true);
+        return;
+      }
+      if (typeof navigator.share !== "function") {
+        setStartOnlineStatus("Share is not available on this device. Use Copy Invite Link.", true);
+        return;
+      }
+      try {
+        await navigator.share({
+          title: "Join my Hanafuda Koi-Koi game",
+          text: "Tap to join my online match.",
+          url: inviteLink,
+        });
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          return;
+        }
+        console.warn("online-start invite share failed", err);
+        setStartOnlineStatus("Could not open share sheet. Use Copy Invite Link.", true);
+      }
     }
 
     function onOnlineBackFromMenu() {
@@ -431,103 +547,47 @@
       setStartOnlinePanelOpen(false);
     }
 
-    async function onStartResumeFromCard() {
-      if (resumeInFlight) return;
-      const activeOnlineCandidate = resumeCandidate;
-      if (!activeOnlineCandidate) return;
-      resumeInFlight = true;
-      refreshStartMenuAsyncUx();
-      resumeRetryReady = false;
-      try {
-        if (typeof handleOnlineReconnect !== "function") return;
-        setCodeStatus("Resuming online game...", false, "start");
-        await handleOnlineReconnect(activeOnlineCandidate.roomCode, activeOnlineCandidate.role);
-        setResumeCandidate(null);
-        setExpiredRoomNotice("");
-      } catch (err) {
-        console.warn("online-start resume from card failed", err);
-        const message = String(err?.message || "").toLowerCase();
-        if (message.includes("expired") || message.includes("not found") || message.includes("closed")) {
-          setExpiredRoomNotice("This game has expired.");
-          if (typeof clearOnlineSessionContext === "function") {
-            clearOnlineSessionContext();
-          }
-          setResumeCandidate(null);
-        }
-        if (resumeCandidate) {
-          resumeRetryReady = true;
-        }
-        setCodeStatus("Could not reconnect. Try again or return to menu.", true, "start");
-      } finally {
-        resumeInFlight = false;
-        refreshStartMenuAsyncUx();
-      }
-    }
-
-    async function onStartResumeLeaveFromCard() {
-      if (resumeInFlight) return;
-      const activeOnlineCandidate = resumeCandidate;
-      if (!activeOnlineCandidate) return;
-      const confirmed = window.confirm("Leave this online game and return to menu? Your opponent may be notified that you left.");
-      if (!confirmed) return;
-      resumeInFlight = true;
-      resumeRetryReady = false;
-      refreshStartMenuAsyncUx();
-      try {
-        const rtc = getRtcBridge();
-        if (rtc && typeof rtc.writeAbandoned === "function") {
-          await rtc.writeAbandoned(activeOnlineCandidate.role, activeOnlineCandidate.roomCode);
-        }
-      } catch (err) {
-        console.warn("online-start resume leave abandon failed", err);
-      } finally {
-        if (typeof clearOnlineSessionContext === "function") {
-          clearOnlineSessionContext();
-        }
-        setResumeCandidate(null);
-        setExpiredRoomNotice("");
-        setCodeStatus("", false, "start");
-        setStartOnlineStatus("", false);
-        setStartOnlinePanelOpen(false);
-        resumeInFlight = false;
-        refreshStartMenuAsyncUx();
-      }
-    }
-
     function dismissStartExpiredNote() {
       setExpiredRoomNotice("");
     }
 
-    async function startOnlineSession(role) {
+    async function startOnlineSession(role, options = {}) {
       const hostRequest = role === "host";
       const hostBtn = ui.onlineHostBtn || null;
       const hostBtnOriginalText = hostBtn ? hostBtn.textContent : "";
+      const roomCodeOverride = normalizeRoomCodeInput(options.roomCodeOverride || "");
+      const source = String(options.source || "").trim().toLowerCase();
       let hostLockAcquired = false;
       try {
         const rtc = getRtcBridge();
         if (!rtc || typeof rtc.hostRoom !== "function" || typeof rtc.joinRoom !== "function") {
           setStartOnlineStatus("Online mode unavailable: RTC bridge not loaded.", true);
-          return;
+          return false;
         }
-        if (!ensureOnlineAuthReadyForStart()) return;
-        const joinRoomCode = normalizeRoomCodeInput(ui.onlineRoomCodeInput?.value || "");
+        if (!ensureOnlineAuthReadyForStart()) return false;
+        const joinRoomCode = roomCodeOverride || normalizeRoomCodeInput(ui.onlineRoomCodeInput?.value || "");
         setStartOnlinePanelMode(role === "host" ? "host" : "join");
         if (role === "guest" && ui.onlineRoomCodeInput) {
           ui.onlineRoomCodeInput.value = joinRoomCode;
         }
         if (role === "guest") {
           if (!joinRoomCode) {
-            setStartOnlineStatus("Enter a room code to join.", true);
-            return;
+            setStartOnlineStatus(source === "invite-link" ? getInviteFailureMessage("invalid") : "Enter a room code to join.", true);
+            return false;
           }
           if (!onlineRoomCodeRegex.test(joinRoomCode)) {
-            setStartOnlineStatus(`Room code must be exactly ${onlineRoomCodeLength} uppercase letters/numbers.`, true);
-            return;
+            setStartOnlineStatus(
+              source === "invite-link"
+                ? getInviteFailureMessage("invalid")
+                : `Room code must be exactly ${onlineRoomCodeLength} uppercase letters/numbers.`,
+              true
+            );
+            return false;
           }
         }
 
         if (hostRequest) {
-          if (hostCreateInFlight) return;
+          if (hostCreateInFlight) return false;
           hostCreateInFlight = true;
           hostLockAcquired = true;
           if (hostBtn) {
@@ -550,7 +610,7 @@
               continue;
             }
             setStartOnlineStatus(`Room code must be exactly ${onlineRoomCodeLength} uppercase letters/numbers.`, true);
-            return;
+            return false;
           }
 
           setStartOnlinePanelOpen(true);
@@ -586,26 +646,22 @@
               persistOnlineSessionContext(roomCode, role);
             }
             state.rtcStatus = String(rtc.getStatus?.() || "connecting");
-            setResumeCandidate({
-              roomCode,
-              role,
-              lastActiveAt: Date.now(),
-            });
             setExpiredRoomNotice("");
             if (role === "host") {
-              setStartOnlineStatus(`Room ${roomCode} ready. Waiting for your friend to connect...`, false);
-              try {
-                if (navigator.clipboard?.writeText) {
-                  await navigator.clipboard.writeText(roomCode);
-                }
-              } catch (_err) {
-                // Best-effort copy only.
+              const inviteLink = getInviteLinkForRoom(roomCode);
+              if (inviteLink) {
+                setStartOnlineStatus("Invite link ready. Tap Copy Invite Link or Share Invite.", false);
+              } else {
+                setStartOnlineStatus(`Room ${roomCode} ready. Share invite link with your friend.`, false);
               }
             } else {
-              setStartOnlineStatus(`Room ${roomCode} joined. Waiting for opponent...`, false);
+              setStartOnlineStatus(
+                source === "invite-link" ? `Joined invite ${roomCode}. Waiting for opponent...` : `Room ${roomCode} joined.`,
+                false
+              );
             }
             renderAll();
-            return;
+            return true;
           } catch (err) {
             lastError = err;
             if (role === "host" && isOnlineRoomCodeCollisionError(err) && attempt < maxAttempts) {
@@ -619,14 +675,24 @@
         setStartOnlinePanelOpen(true);
         if (role === "host" && isOnlineRoomCodeCollisionError(lastError)) {
           setStartOnlineStatus("Could not create a new online room right now. Please try again.", true);
-          return;
+          return false;
         }
         if (isOnlineAuthFailureError(lastError)) {
           setOnlineAuthState("error", ONLINE_AUTH_FAILURE_MESSAGE);
           setStartOnlineStatus(ONLINE_AUTH_FAILURE_MESSAGE, true);
-          return;
+          return false;
         }
-        setStartOnlineStatus(`Online setup failed: ${lastError?.message || "unknown error"}`, true);
+        if (role === "guest") {
+          const inviteFailure = classifyInviteFailureFromError(lastError);
+          if (inviteFailure) {
+            setStartOnlineStatus(getInviteFailureMessage(inviteFailure), true);
+            return false;
+          }
+          setStartOnlineStatus("Could not join this room. Check the invite and try again.", true);
+          return false;
+        }
+        setStartOnlineStatus("Online setup failed. Please try again.", true);
+        return false;
       } finally {
         if (hostLockAcquired) {
           hostCreateInFlight = false;
@@ -640,42 +706,18 @@
     }
 
     function onRtcReceiveTurnCode(rawPayload) {
-      if (state.rtcPendingStart) {
-        beginOnlineFriendMatch();
+      if (typeof handleIncomingRtcPayload !== "function") {
+        setFriendInterstitialOpen(true, state.currentPlayer);
+        setFriendInterstitialStatus("Incoming online payload handler is unavailable.", true);
+        renderAll();
+        return;
       }
-      let signal = null;
       try {
-        signal = tryDecodeRtcSignal(rawPayload);
+        handleIncomingRtcPayload(rawPayload);
       } catch (err) {
         setFriendInterstitialOpen(true, state.currentPlayer);
-        setFriendInterstitialStatus(`Incoming online signal failed: ${err.message}`, true);
+        setFriendInterstitialStatus(String(err?.message || "Incoming online handoff failed."), true);
         renderAll();
-        return;
-      }
-      if (signal) {
-        try {
-          handleIncomingRtcSignal(signal);
-        } catch (err) {
-          setFriendInterstitialOpen(true, state.currentPlayer);
-          setFriendInterstitialStatus(`Incoming online signal failed: ${err.message}`, true);
-          renderAll();
-        }
-        return;
-      }
-      state.rtcWaiting = false;
-      const loaded = loadCodeIntoGame(rawPayload, "friend", {
-        allowNonCheckpointFriendImport: true,
-        allowMissingDrawPile: true,
-      });
-      if (!loaded) {
-        setFriendInterstitialOpen(true, state.currentPlayer);
-        setFriendInterstitialStatus("Incoming online handoff failed. Please reconnect or retry room setup.", true);
-        renderAll();
-        return;
-      }
-      setFriendInterstitialStatus("", false);
-      if (isFriendMode()) {
-        applyOnlineWaitingStateFromCurrentTurn("raw-turn-code");
       }
     }
 
@@ -699,9 +741,9 @@
       onStartModeOnlineFromMenu,
       onOnlineHostFromMenu,
       onOnlineJoinFromMenu,
+      onOnlineCopyInviteFromMenu,
+      onOnlineShareInviteFromMenu,
       onOnlineBackFromMenu,
-      onStartResumeFromCard,
-      onStartResumeLeaveFromCard,
       startOnlineSession,
       onRtcReceiveTurnCode,
     };

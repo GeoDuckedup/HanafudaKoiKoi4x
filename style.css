@@ -1022,30 +1022,6 @@ button.ghost {
   padding: 4px 7px;
 }
 
-.start-resume-card {
-  border: 1px solid #b49362;
-  background: #fff9ed;
-  border-radius: 10px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.start-resume-card[hidden] {
-  display: none !important;
-}
-
-.start-resume-text {
-  font-size: 0.74rem;
-  font-weight: 800;
-  color: #4f3722;
-}
-
-.start-resume-actions {
-  grid-template-columns: 1fr 1fr;
-}
-
 .start-actions {
   display: grid;
   grid-template-columns: 1fr;
@@ -1057,6 +1033,10 @@ button.ghost {
 }
 
 .start-mode-submenu-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
+.start-online-invite-actions {
   grid-template-columns: 1fr 1fr;
 }
 
@@ -1175,6 +1155,12 @@ button.ghost {
   font-size: 0.76rem;
   font-weight: 800;
   color: #3f2d1a;
+}
+
+.current-games-room {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #5f4b35;
 }
 
 .current-games-score-line {

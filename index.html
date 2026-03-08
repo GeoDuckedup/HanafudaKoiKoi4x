@@ -257,15 +257,8 @@
           </button>
         </div>
         <p>Choose how you want to play.</p>
-        <div id="start-resume-card" class="start-resume-card" hidden>
-          <div id="start-resume-text" class="start-resume-text">Active game - Room ---------- - Last played just now</div>
-          <div class="start-actions start-resume-actions">
-            <button id="start-resume-btn" type="button" class="primary">Resume</button>
-            <button id="start-resume-leave-btn" type="button" class="ghost">Leave Game</button>
-          </div>
-        </div>
         <div id="start-mode-actions" class="start-actions start-mode-actions">
-          <button id="start-mode-cpu-btn" type="button" class="primary">Play with CPU</button>
+          <button id="start-mode-cpu-btn" type="button">Play CPU</button>
           <button id="start-mode-friend-btn" type="button">Play Local</button>
           <button id="start-mode-online-btn" type="button">Play Online</button>
         </div>
@@ -274,7 +267,7 @@
             <div id="start-current-games-title" class="current-games-title">Play Mode</div>
           </div>
           <div class="start-actions start-mode-submenu-actions">
-            <button id="start-mode-new-btn" type="button" class="primary">New Game</button>
+            <button id="start-mode-new-btn" type="button">New Game</button>
             <button id="start-mode-load-btn" type="button">Load Game</button>
           </div>
           <div id="start-current-games-status" class="code-status"></div>
@@ -283,10 +276,10 @@
         </div>
         <div id="start-online-panel" class="online-panel" hidden>
           <div class="start-actions start-mode-actions">
-            <button id="online-host-btn" type="button" class="primary">Host New Room</button>
-            <button id="online-join-btn" type="button">Join Room</button>
+            <button id="online-host-btn" type="button" class="primary">Create Invite</button>
+            <button id="online-join-btn" type="button">Join by Code</button>
           </div>
-          <label id="online-room-code-label" class="code-label" for="online-room-code-input">Room code</label>
+          <label id="online-room-code-label" class="code-label" for="online-room-code-input">Room code (fallback)</label>
           <input
             id="online-room-code-input"
             class="room-code-input"
@@ -298,7 +291,11 @@
             placeholder="AB12CD34EF"
           />
           <div id="online-room-display" class="online-room-display" hidden>
-            Active room: <strong id="online-room-code-text">----------</strong>
+            Invite room: <strong id="online-room-code-text">----------</strong>
+          </div>
+          <div id="online-invite-actions" class="start-actions start-online-invite-actions" hidden>
+            <button id="online-copy-invite-btn" type="button">Copy Invite Link</button>
+            <button id="online-share-invite-btn" type="button">Share Invite</button>
           </div>
           <div class="start-actions">
             <button id="online-back-btn" type="button" class="ghost">Back</button>
@@ -369,6 +366,7 @@
     <script src="ai.js"></script>
     <script src="saves.js"></script>
     <script src="rtc.js"></script>
+    <script src="online-state-sync.js"></script>
     <script src="online.js"></script>
     <script src="online-start.js"></script>
     <script src="online-runtime.js"></script>

@@ -95,6 +95,10 @@
       state.rtcReconnectFailed = false;
       state.rtcOpponentAbandoned = false;
       state.rtcOpponentAbandonedBy = "";
+      state.rtcLastAppliedSnapshotKey = "";
+      state.rtcLastAppliedSnapshotTurnIndex = -1;
+      state.rtcLastAppliedSnapshotReason = "";
+      state.rtcLastAppliedSnapshotAt = 0;
       const rtc = getRtcBridge();
       state.rtcStatus = String(rtc?.getStatus?.() || "idle");
       setStartOnlineStatus("", false);
