@@ -1157,10 +1157,14 @@ button.ghost {
   color: #3f2d1a;
 }
 
-.current-games-room {
-  font-size: 0.7rem;
+.current-games-meta {
+  font-size: 0.68rem;
   font-weight: 700;
-  color: #5f4b35;
+  color: #6b5338;
+}
+
+.current-games-meta-secondary {
+  font-size: 0.66rem;
 }
 
 .current-games-score-line {
@@ -1225,7 +1229,8 @@ button.ghost {
 
 .current-games-status.is-your-turn::before,
 .current-games-status.is-player-1-turn::before,
-.current-games-status.is-player-2-turn::before {
+.current-games-status.is-player-2-turn::before,
+.current-games-status.is-waiting::before {
   content: "";
   display: inline-block;
   width: 0.45rem;
@@ -1251,6 +1256,18 @@ button.ghost {
 
 .current-games-status.is-player-2-turn::before {
   background: #d13a32;
+}
+
+.current-games-status.is-waiting {
+  color: #8a651f;
+}
+
+.current-games-status.is-waiting::before {
+  background: #d5a23b;
+}
+
+.current-games-status.is-finished {
+  color: #78644f;
 }
 
 .online-panel {

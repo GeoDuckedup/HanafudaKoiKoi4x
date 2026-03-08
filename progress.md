@@ -7,6 +7,12 @@ Current defaults (runtime):
 - Reconnect timeout: 30 s
 - Presence patience: 5 min
 
+- Phase 4B load/resume coherence polish:
+  - Unified load-card metadata rows across CPU/Local/Online (`Round`, shared score line, shared status row).
+  - Standardized waiting-state wording (`CPU turn`, `Waiting on opponent`) and added consistent waiting/finished status styling.
+  - Online load list is now server-first; legacy local online context fallback is demoted to transition-only when no server entries exist.
+  - Mode-aware card action labels now read `Leave` for online and `Delete` for device saves.
+
 - Removed all `assets/manual` sheet paths from `SHEET_PATHS`.
 - Removed legacy `SPRITE_LAYOUT` manual fallback mapping.
 - Switched to strict custom-only sprite source (`MONTH_SPRITES`) for all 12 months.
@@ -1128,3 +1134,74 @@ Current defaults (runtime):
 - Validation notes:
   - `node --check` passed for `game.js`, `online-start.js`, and `saves.js`.
   - Playwright client run was attempted via `develop-web-game` skill script, but failed because `playwright` package is not installed in this environment (`ERR_MODULE_NOT_FOUND`).
+
+## 2026-03-08 - Phase 3C invite-flow migration (client-facing)
+- Added canonical invite URL handling around `?join=ROOM_ID` in `game.js` URL/session helpers.
+- Added legacy URL migration path (`?room=&role=` -> `?join=` via `replaceState`) and made legacy role non-authoritative.
+- Updated `online-start.js` load-time flow to:
+  - auto-handle invite links,
+  - pre-check room joinability through `roomIndex`,
+  - probe self membership for already-joined detection,
+  - map explicit invite failures (`invalid`, `expired`, `full`, `already joined`) to user-facing messages.
+- Shifted host UX to invite-first actions with new `Copy Invite Link` + `Share Invite` handlers; manual room code join remains fallback.
+- Added `rtc.readSelfMemberRole(roomCode)` for self-only memberMap probe.
+- Added `tests/phase3c-invite-flow-contract.test.js` and validated:
+  - `node tests/phase3b-rules-contract.test.js`
+  - `node tests/phase3c-invite-flow-contract.test.js`
+- JS parse check passed for `game.js`, `online-start.js`, `rtc.js`.
+
+## 2026-03-08 - Phase 3D async-gap hardening + state-sync extraction
+- Added new module `online-state-sync.js` to centralize online state sync responsibilities:
+  - authoritative snapshot apply
+  - reconnect snapshot apply
+  - duplicate snapshot guard
+  - waiting/active posture derivation
+- Wired `online.js` to use `online-state-sync.js` for:
+  - reconnect snapshot hydration (`applyReconnectSnapshot`)
+  - signal snapshot hydration (`session-init`, `turn-code`)
+  - raw payload hydration and duplicate guard via new `handleIncomingRtcPayload`
+- Tightened snapshot-signal persistence handling:
+  - removed fire-and-forget `requireSnapshotWrite` path from `sendRtcSignal`
+  - added awaited `sendRtcSignalWithSnapshot`
+  - made `syncOnlineRoundTransitionSnapshot` async and outcome-based
+- Updated round-end sync call sites in `game.js` to await promise outcome and only report failure after actual result.
+- Added snapshot-apply tracking fields to state (`rtcLastAppliedSnapshot*`) and reset paths.
+- Updated online start receiver to delegate incoming payload handling to session controller/state-sync path.
+- Added Phase 3D tests:
+  - `tests/phase3d-online-runtime-contract.test.js`
+  - `tests/phase3d-online-state-sync.test.js`
+- Validation:
+  - `node tests/phase3b-rules-contract.test.js`
+  - `node tests/phase3c-invite-flow-contract.test.js`
+  - `node tests/phase3d-online-runtime-contract.test.js`
+  - `node tests/phase3d-online-state-sync.test.js`
+  - JS parse checks passed for modified runtime files.
+- Hotfix after manual repro: online async snapshot encoding now keeps `drawPile` in `encodeStateForOnline()`.
+  - Root cause: missing drawPile in authoritative reconnect snapshot can cause phase-1-only behavior after rejoin from fresh browser state.
+  - Added regression guard in `tests/phase3d-online-runtime-contract.test.js` to ensure drawPile is not stripped.
+- Phase 3E cleanup/stabilization pass completed (invite-first online UX cleanup):
+  - Removed legacy start-menu online resume card UI and controller state/handlers (`start-resume-card`, `resumeCandidate`, resume-card actions).
+  - Online resume/leave now routes through existing mode-specific surface: `Play Online -> Load Game`.
+  - Replaced online load placeholder with real resumable online entry derived from local online session context + room index/member-role validation.
+  - Added online load-list actions:
+    - Resume uses `handleOnlineReconnect(roomCode, role)`.
+    - Delete/Leave uses `rtc.writeAbandoned(role, roomCode)` (best effort) + local context clear.
+  - Updated already-joined invite copy to direct users to `Play Online -> Load Game`.
+  - Retained minimal safe URL migration compatibility (`?room=&role=` normalization to `?join=`) and Join by Code fallback during transition.
+- Phase 4A online load upgrade (server-backed listing):
+  - Added Firebase `userRooms/{uid}/{roomCode}` summary index rules for self-readable/self-writable membership-backed online room listing.
+  - Added RTC summary sync + APIs:
+    - `listOwnRoomSummaries()`
+    - `readRoomSnapshotByCode(roomCode)`
+    - `removeOwnRoomSummary(roomCode)`
+    - `syncOwnRoomSummary(roomCode, role)`
+  - RTC now keeps `userRooms` entries synchronized on host/join/rejoin flows and activity touches.
+  - Upgraded Play Online -> Load Game to build cards from server-backed room summaries (multi-match capable), with snapshot-derived metadata when available.
+  - Online load cards now show room, round/month, score summary, status, role seat, and updated time.
+  - Online status mapping now supports `Your turn`, `Waiting on opponent`, `Finished`, and `Expired / unavailable`.
+  - Online delete/leave flow now removes only the selected online room summary and clears URL/session context for that room.
+  - Invite `already-joined` startup path now routes users into Play Online -> Load Game and can seed server summary sync.
+- Online leave-behavior hotfix:
+  - `onFriendBackToMenu()` no longer writes `abandoned=true` for normal in-game menu leave.
+  - This preserves async continuity: opponent can continue playing when you temporarily leave.
+  - Explicit abandon remains available only through Online Load Game delete/leave action.
