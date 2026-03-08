@@ -37,7 +37,6 @@
         <div class="field-koi-row">
           <span id="koi-state" class="koi-state mult-1">Table 1x | Last Koi-Koi: none</span>
         </div>
-        <div id="turn-meta" class="turn-meta">Starts: You | Turn: You</div>
         <div class="field-layout">
           <div id="field" class="field-grid"></div>
           <aside id="draw-preview" class="draw-preview">
@@ -86,8 +85,8 @@
         <div class="top-actions">
           <button id="online-leave-btn" class="ghost" type="button" hidden>Leave Online</button>
           <button id="game-summary-toggle" class="ghost" type="button">Game 1 / 12</button>
+          <button id="main-menu-btn" class="ghost" type="button">Main Menu</button>
           <button id="log-toggle" class="ghost" type="button">Action Log</button>
-          <button id="code-toggle" class="ghost" type="button">Code</button>
           <button id="rules-toggle" class="ghost" type="button">Rules</button>
         </div>
       </header>
@@ -264,7 +263,7 @@
             x
           </button>
         </div>
-        <p>Choose how you want to play, or load from a link or code.</p>
+        <p>Choose how you want to play.</p>
         <div id="start-resume-card" class="start-resume-card" hidden>
           <div id="start-resume-text" class="start-resume-text">Active game - Room ---------- - Last played just now</div>
           <div class="start-actions start-resume-actions">
@@ -272,12 +271,23 @@
             <button id="start-resume-leave-btn" type="button" class="ghost">Leave Game</button>
           </div>
         </div>
-        <div class="start-actions start-mode-actions">
+        <div id="start-mode-actions" class="start-actions start-mode-actions">
           <button id="start-mode-cpu-btn" type="button" class="primary">Play with CPU</button>
-          <button id="start-mode-friend-btn" type="button">Play with Friend</button>
+          <button id="start-mode-friend-btn" type="button">Play Local</button>
           <button id="start-mode-online-btn" type="button">Play Online</button>
         </div>
-        <div id="start-subtitle" class="start-subtitle">Friend mode supports both pass-device and turn-code handoff each turn.</div>
+        <div id="start-current-games-panel" class="current-games-panel" hidden>
+          <div class="current-games-head">
+            <div id="start-current-games-title" class="current-games-title">Play Mode</div>
+          </div>
+          <div class="start-actions start-mode-submenu-actions">
+            <button id="start-mode-new-btn" type="button" class="primary">New Game</button>
+            <button id="start-mode-load-btn" type="button">Load Game</button>
+          </div>
+          <div id="start-current-games-status" class="code-status"></div>
+          <div id="start-current-games-empty" class="current-games-empty" hidden></div>
+          <div id="start-current-games-list" class="current-games-list"></div>
+        </div>
         <div id="start-online-panel" class="online-panel" hidden>
           <div class="start-actions start-mode-actions">
             <button id="online-host-btn" type="button" class="primary">Host New Room</button>
@@ -297,27 +307,10 @@
           <div id="online-room-display" class="online-room-display" hidden>
             Active room: <strong id="online-room-code-text">----------</strong>
           </div>
-          <div id="online-bookmark-prompt" class="online-bookmark-prompt" hidden>
-            <span>Bookmark this URL to resume on any device.</span>
-            <div class="online-bookmark-actions">
-              <button id="online-bookmark-copy-btn" type="button">Copy URL</button>
-              <button id="online-bookmark-dismiss-btn" type="button" class="ghost" aria-label="Dismiss">x</button>
-            </div>
-          </div>
           <div class="start-actions">
             <button id="online-back-btn" type="button" class="ghost">Back</button>
           </div>
           <div id="start-online-status" class="code-status"></div>
-        </div>
-        <div id="start-load-actions" class="start-actions">
-          <button id="start-load-btn" type="button">Load Turn Link</button>
-        </div>
-        <div id="start-manual-load-wrap" class="manual-load-wrap" hidden>
-          <label class="code-label" for="start-import-code">Load turn link or code</label>
-          <textarea id="start-import-code" class="code-text" placeholder="Paste a save/share link or code here"></textarea>
-          <div class="start-actions">
-            <button id="start-load-manual-btn" type="button">Load Pasted Link</button>
-          </div>
         </div>
         <div id="start-menu-status" class="code-status"></div>
       </div>
@@ -327,7 +320,7 @@
     <section id="friend-interstitial" class="friend-interstitial" hidden>
       <div class="friend-interstitial-card">
         <h2 id="friend-interstitial-title">Friend Turn Handoff</h2>
-        <p id="friend-interstitial-text">Turn complete. Pass device or share turn link.</p>
+        <p id="friend-interstitial-text">Turn complete. Pass device to continue.</p>
         <div id="friend-manual-load-wrap" class="manual-load-wrap" hidden>
           <label class="code-label" for="friend-import-code">Load turn link or code</label>
           <textarea id="friend-import-code" class="code-text" placeholder="Paste turn link or code from other player"></textarea>
@@ -378,6 +371,10 @@
     </script>
     <script src="scoring-rules.js"></script>
     <script src="state.js"></script>
+    <script src="utils.js"></script>
+    <script src="snapshot-codec.js"></script>
+    <script src="ai.js"></script>
+    <script src="saves.js"></script>
     <script src="rtc.js"></script>
     <script src="online.js"></script>
     <script src="online-start.js"></script>

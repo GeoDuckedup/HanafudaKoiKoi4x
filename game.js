@@ -89,122 +89,20 @@ const MONTH_SPRITES = {
 };
 
 const ACTION_LOG_LIMIT = 180;
-const DEFAULT_AI_PROFILE = "balanced";
-const AI_PROFILE_KEYS = ["safe", "balanced", "gambler"];
-
-const AI_PROFILES = {
-  safe: {
-    card: {
-      immediate: 1.0,
-      yakuGain: 5.8,
-      comboGain: 1.6,
-      denial: 2.3,
-      month: 0.7,
-      expose: 1.5,
-      lightBonus: 1.0,
-      jitter: 0.12,
-    },
-    decision: {
-      passBase: 1.8,
-      koiBase: -0.3,
-      multiplierHunger: 0.6,
-      futureGainWeight: 0.52,
-      riskWeight: 0.72,
-      leadLockWeight: 0.24,
-      leadRiskAversion: 0.22,
-      comebackWeight: 0.11,
-      latePassWeight: 0.46,
-      behindPassPenalty: 0.08,
-      highMultPassBonus: 1.3,
-      handPhaseKoiBonus: 0.18,
-      autoPassAtPoints: 8,
-      maxMultRiskGuard: 0.95,
-      koiMargin: 0.26,
-      coinFlipBand: 0.9,
-      randomKoiChance: 0.32,
-    },
-  },
-  balanced: {
-    card: {
-      immediate: 1.1,
-      yakuGain: 5.2,
-      comboGain: 1.9,
-      denial: 1.7,
-      month: 0.9,
-      expose: 1.0,
-      lightBonus: 1.2,
-      jitter: 0.2,
-    },
-    decision: {
-      passBase: 0.7,
-      koiBase: 0.5,
-      multiplierHunger: 0.95,
-      futureGainWeight: 0.62,
-      riskWeight: 0.58,
-      leadLockWeight: 0.15,
-      leadRiskAversion: 0.16,
-      comebackWeight: 0.21,
-      latePassWeight: 0.3,
-      behindPassPenalty: 0.06,
-      highMultPassBonus: 0.8,
-      handPhaseKoiBonus: 0.5,
-      autoPassAtPoints: 10,
-      maxMultRiskGuard: 1.12,
-      koiMargin: 0.16,
-      coinFlipBand: 0.75,
-      randomKoiChance: 0.57,
-    },
-  },
-  gambler: {
-    card: {
-      immediate: 1.2,
-      yakuGain: 4.7,
-      comboGain: 2.3,
-      denial: 1.1,
-      month: 1.1,
-      expose: 0.6,
-      lightBonus: 1.5,
-      jitter: 0.34,
-    },
-    decision: {
-      passBase: -0.6,
-      koiBase: 1.8,
-      multiplierHunger: 1.28,
-      futureGainWeight: 0.86,
-      riskWeight: 0.42,
-      leadLockWeight: 0.08,
-      leadRiskAversion: 0.1,
-      comebackWeight: 0.34,
-      latePassWeight: 0.18,
-      behindPassPenalty: 0.03,
-      highMultPassBonus: 0.25,
-      handPhaseKoiBonus: 0.92,
-      autoPassAtPoints: 13,
-      maxMultRiskGuard: 1.45,
-      koiMargin: -0.08,
-      coinFlipBand: 1.0,
-      randomKoiChance: 0.74,
-    },
-  },
-};
-
-const CPU_PROFILE_META = {
-  safe: {
-    name: "The Timid",
-    style: "Low Risk",
-    avatar: "assets/avatars/the-timid.png",
-  },
-  balanced: {
-    name: "The Monk",
-    style: "Balanced",
-    avatar: "assets/avatars/the-monk.png",
-  },
-  gambler: {
-    name: "The Gambler",
-    style: "High Risk",
-    avatar: "assets/avatars/the-gambler.png",
-  },
-};
+const aiBootstrap = window.HKKAI;
+if (
+  !aiBootstrap ||
+  typeof aiBootstrap !== "object" ||
+  !Array.isArray(aiBootstrap.AI_PROFILE_KEYS) ||
+  !aiBootstrap.AI_PROFILES ||
+  !aiBootstrap.CPU_PROFILE_META
+) {
+  throw new Error("AI bootstrap not loaded.");
+}
+const DEFAULT_AI_PROFILE = String(aiBootstrap.DEFAULT_AI_PROFILE || "balanced");
+const AI_PROFILE_KEYS = aiBootstrap.AI_PROFILE_KEYS;
+const AI_PROFILES = aiBootstrap.AI_PROFILES;
+const CPU_PROFILE_META = aiBootstrap.CPU_PROFILE_META;
 
 const MONTHS = [
   { id: 1, name: "January", flower: "Pine" },
@@ -346,6 +244,10 @@ const scoringRules = window.HKKScoringRules;
 if (!scoringRules || !Array.isArray(scoringRules.fixedYakuRules) || !Array.isArray(scoringRules.incrementalYakuRules)) {
   throw new Error("Scoring rules bootstrap not loaded.");
 }
+const utils = window.HKKUtils;
+if (!utils || typeof utils.computeCodeChecksum !== "function") {
+  throw new Error("Utils bootstrap not loaded.");
+}
 const FIXED_YAKU_RULES = scoringRules.fixedYakuRules;
 const INCREMENTAL_YAKU_RULES = scoringRules.incrementalYakuRules;
 
@@ -377,6 +279,8 @@ const ONLINE_AUTH_READY_TIMEOUT_MS = 70_000;
 const ONLINE_HOST_CREATE_MAX_ATTEMPTS = 5;
 const ONLINE_STORAGE_ROOM_KEY = "hkk_online_room";
 const ONLINE_STORAGE_ROLE_KEY = "hkk_online_role";
+const CPU_SAVE_TITLE = "vs CPU";
+const LOCAL_SAVE_TITLE = "Local Match";
 
 const drawPreviewFx = {
   lastCardId: null,
@@ -431,7 +335,10 @@ function init() {
         if (reconnectResult.notice) {
           setCodeStatus(reconnectResult.notice, false, "start");
         }
-        tryLoadFromLocationHash();
+        const loadedFromHash = tryLoadFromLocationHash();
+        if (!loadedFromHash) {
+          refreshCurrentGamesPanel();
+        }
       }
     })
     .catch((err) => {
@@ -570,6 +477,71 @@ let onlineStartController = null;
 let onlineRuntimeController = null;
 let onlineHandoffController = null;
 let codeIoController = null;
+let snapshotCodec = null;
+let aiController = null;
+let cpuAutosaveMatchId = null;
+let localAutosaveMatchId = null;
+let currentGamesRefreshToken = 0;
+let currentGamesResumeInFlight = false;
+let currentGamesDeleteInFlight = false;
+const currentGamesHandCountCache = new Map();
+let startModeMenuMode = null;
+let startModeLoadActive = false;
+
+function getSnapshotCodec() {
+  if (snapshotCodec) return snapshotCodec;
+  if (!window.HKKSnapshotCodec || typeof window.HKKSnapshotCodec.createSnapshotCodec !== "function") {
+    throw new Error("Snapshot codec bootstrap not loaded.");
+  }
+  snapshotCodec = window.HKKSnapshotCodec.createSnapshotCodec({
+    state,
+    SAVE_CODE_PREFIX,
+    SAVE_CODE_PREFIX_VERSION,
+    SAVE_MIGRATIONS,
+    SAVE_CODE_VERSION,
+    SUPPORTED_SAVE_VERSIONS,
+    ACTION_LOG_LIMIT,
+    AI_PROFILES,
+    DEFAULT_AI_PROFILE,
+    CARD_BY_ID,
+    CARD_DECK,
+    encodeBase64UrlUtf8,
+    decodeBase64UrlUtf8,
+    computeCodeChecksum: utils.computeCodeChecksum,
+    computeTurnCheckpointReady,
+    createPlayer,
+    sortByMonth,
+    computeYaku,
+    setFriendInterstitialOpen,
+    renderAll,
+    playTurnRecapForViewer,
+    resumeLoadedStateFlow,
+    clearRoundRuntimeTimers,
+  });
+  return snapshotCodec;
+}
+
+function getAIController() {
+  if (aiController) return aiController;
+  if (!window.HKKAI || typeof window.HKKAI.createAIController !== "function") {
+    throw new Error("AI controller bootstrap not loaded.");
+  }
+  aiController = window.HKKAI.createAIController({
+    state,
+    getCpuPlayerIndex,
+    getFieldMatches,
+    describeMonth,
+    addSystemLog,
+    renderAll,
+    executePlayFromHand,
+    CARD_BY_ID,
+    computeYaku,
+    AI_STEP_THINK_MS,
+    AI_STEP_CPU_PHASE1_PREVIEW_MS,
+    AI_STEP_TARGET_MS,
+  });
+  return aiController;
+}
 
 function getOnlineSessionController() {
   if (onlineSessionController) return onlineSessionController;
@@ -826,6 +798,829 @@ function refreshStartMenuAsyncUx() {
   return getOnlineStartController().refreshStartMenuAsyncUx();
 }
 
+function getSavesBridge() {
+  const bridge = window.HKKSaves;
+  if (!bridge) return null;
+  if (
+    typeof bridge.saveMatch !== "function" ||
+    typeof bridge.loadMatch !== "function" ||
+    typeof bridge.listMatches !== "function" ||
+    typeof bridge.deleteMatch !== "function"
+  ) {
+    return null;
+  }
+  return bridge;
+}
+
+function isDeviceCurrentGamesMatch(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  return entry.mode === "cpu" || entry.mode === "local" || entry.mode === "online";
+}
+
+function normalizeStartModeMenuMode(mode) {
+  if (mode === "cpu" || mode === "local" || mode === "online") return mode;
+  return null;
+}
+
+function getStartModeMenuTitle(mode) {
+  if (mode === "cpu") return "Play with CPU";
+  if (mode === "local") return "Play Local";
+  if (mode === "online") return "Play Online";
+  return "Play Mode";
+}
+
+function getStartModeMenuButton(mode) {
+  if (mode === "cpu") return ui.startModeCpuBtn || null;
+  if (mode === "local") return ui.startModeFriendBtn || null;
+  if (mode === "online") return ui.startModeOnlineBtn || null;
+  return null;
+}
+
+function compareCurrentGamesMatches(a, b) {
+  const aFinished = Boolean(a?.finished);
+  const bFinished = Boolean(b?.finished);
+  if (aFinished !== bFinished) {
+    return aFinished ? 1 : -1;
+  }
+  const aUpdated = Number(a?.updatedAt || 0);
+  const bUpdated = Number(b?.updatedAt || 0);
+  if (bUpdated !== aUpdated) return bUpdated - aUpdated;
+  const aId = String(a?.id || "");
+  const bId = String(b?.id || "");
+  return aId.localeCompare(bId);
+}
+
+function formatCurrentGamesUpdatedAt(timestamp) {
+  const value = Number(timestamp || 0);
+  if (!Number.isFinite(value) || value <= 0) return "just now";
+  const elapsedMs = Math.max(0, Date.now() - value);
+  if (elapsedMs < 60_000) return "just now";
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function formatCurrentGamesModeLabel(mode) {
+  if (mode === "cpu") return "CPU";
+  if (mode === "local") return "Local";
+  return "Other";
+}
+
+function formatCurrentGamesStatusLabel(status) {
+  if (status === "your-turn") return "Your turn";
+  if (status === "waiting") return "Waiting";
+  if (status === "pass-device") return "Pass device";
+  if (status === "finished") return "Finished";
+  return "Unknown";
+}
+
+function buildCurrentGamesStatusMeta(savedMatch, p0Label, p1Label) {
+  if (savedMatch?.mode === "local" && savedMatch?.finished !== true) {
+    if (savedMatch.turnOwner === 0) {
+      return {
+        text: `${p0Label} Turn`,
+        className: "is-player-1-turn",
+      };
+    }
+    if (savedMatch.turnOwner === 1) {
+      return {
+        text: `${p1Label} Turn`,
+        className: "is-player-2-turn",
+      };
+    }
+  }
+  return {
+    text: formatCurrentGamesStatusLabel(savedMatch?.status),
+    className: savedMatch?.status === "your-turn" ? "is-your-turn" : "",
+  };
+}
+
+function getCurrentTurnHandCountFromSavedMatch(savedMatch) {
+  const turnOwner = savedMatch?.turnOwner;
+  if (turnOwner !== 0 && turnOwner !== 1) return null;
+  const cacheKey = `${savedMatch.id}:${savedMatch.updatedAt}`;
+  if (currentGamesHandCountCache.has(cacheKey)) {
+    return currentGamesHandCountCache.get(cacheKey);
+  }
+  let handCount = null;
+  try {
+    const snapshot = decodeGameCode(savedMatch.gameSnapshot, { allowMissingDrawPile: true });
+    const hand = snapshot?.players?.[turnOwner]?.hand;
+    if (Array.isArray(hand)) {
+      handCount = hand.length;
+    }
+  } catch (_err) {
+    handCount = null;
+  }
+  currentGamesHandCountCache.set(cacheKey, handCount);
+  return handCount;
+}
+
+function setStartCurrentGamesStatus(message, isError = false) {
+  const node = ui.startCurrentGamesStatus;
+  if (!node) return;
+  node.textContent = message || "";
+  node.classList.toggle("error", Boolean(message && isError));
+  node.classList.toggle("success", Boolean(message && !isError));
+}
+
+function setCurrentGamesCardsDisabled(disabled) {
+  const listNode = ui.startCurrentGamesList;
+  if (!listNode) return;
+  const cards = listNode.querySelectorAll("button.current-games-card, button.current-games-delete");
+  cards.forEach((card) => {
+    card.disabled = Boolean(disabled);
+  });
+}
+
+function buildCurrentGamesCard(savedMatch) {
+  const row = document.createElement("div");
+  row.className = "current-games-card-row";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "current-games-card";
+  button.dataset.matchId = String(savedMatch.id || "");
+
+  const head = document.createElement("div");
+  head.className = "current-games-card-head";
+
+  const chip = document.createElement("span");
+  chip.className = "current-games-chip";
+  chip.textContent = formatCurrentGamesModeLabel(savedMatch.mode);
+  head.appendChild(chip);
+
+  const updated = document.createElement("span");
+  updated.className = "current-games-updated";
+  updated.textContent = `Updated ${formatCurrentGamesUpdatedAt(savedMatch.updatedAt)}`;
+  head.appendChild(updated);
+  button.appendChild(head);
+
+  const names = Array.isArray(savedMatch.playerNames) ? savedMatch.playerNames.filter(Boolean) : [];
+  const title = String(savedMatch.title || (savedMatch.mode === "cpu" ? CPU_SAVE_TITLE : LOCAL_SAVE_TITLE)).trim();
+  const isLocalCard = savedMatch.mode === "local";
+  if (!isLocalCard) {
+    const main = document.createElement("div");
+    main.className = "current-games-main";
+    main.textContent = names.length > 0 ? `${title} - ${names.join(" vs ")}` : title;
+    button.appendChild(main);
+  }
+
+  const roundValue = Number(savedMatch.round || 1);
+  const monthName = describeMonthNameOnly(roundValue);
+  const p0 = Number(savedMatch.scoreSnapshot?.p0 || 0);
+  const p1 = Number(savedMatch.scoreSnapshot?.p1 || 0);
+  const p0Label = names[0] || "P1";
+  const p1Label = names[1] || "P2";
+  const scoreLine = document.createElement("div");
+  scoreLine.className = "current-games-score-line";
+  const p0Score = document.createElement("span");
+  p0Score.className = "current-games-score-p1";
+  p0Score.textContent = `${p0Label} Score ${p0}`;
+  const divider = document.createElement("span");
+  divider.className = "current-games-score-divider";
+  divider.textContent = "|";
+  const p1Score = document.createElement("span");
+  p1Score.className = "current-games-score-p2";
+  p1Score.textContent = `${p1Label} Score ${p1}`;
+  scoreLine.appendChild(p0Score);
+  scoreLine.appendChild(divider);
+  scoreLine.appendChild(p1Score);
+  button.appendChild(scoreLine);
+
+  const turnHandCount = getCurrentTurnHandCountFromSavedMatch(savedMatch);
+
+  const statusRow = document.createElement("div");
+  statusRow.className = "current-games-status-row";
+  const status = document.createElement("div");
+  status.className = "current-games-status";
+  const statusMeta = buildCurrentGamesStatusMeta(savedMatch, p0Label, p1Label);
+  if (statusMeta.className) {
+    status.classList.add(statusMeta.className);
+  }
+  status.textContent = statusMeta.text;
+  statusRow.appendChild(status);
+  const side = document.createElement("div");
+  side.className = "current-games-side";
+  const month = document.createElement("div");
+  month.className = "current-games-month";
+  month.textContent = monthName;
+  side.appendChild(month);
+  if (turnHandCount !== null && savedMatch.status !== "finished") {
+    const hand = document.createElement("div");
+    hand.className = "current-games-hand";
+    hand.textContent = `Hand ${turnHandCount}/8`;
+    side.appendChild(hand);
+  }
+  statusRow.appendChild(side);
+  button.appendChild(statusRow);
+
+  row.appendChild(button);
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "current-games-delete";
+  deleteBtn.dataset.matchId = String(savedMatch.id || "");
+  deleteBtn.textContent = "Delete";
+  row.appendChild(deleteBtn);
+
+  return row;
+}
+
+function renderCurrentGamesList(matches) {
+  if (!ui.startCurrentGamesList || !ui.startCurrentGamesEmpty) return;
+  ui.startCurrentGamesList.textContent = "";
+  const entries = Array.isArray(matches) ? matches : [];
+  if (!entries.length) {
+    ui.startCurrentGamesEmpty.hidden = false;
+    ui.startCurrentGamesEmpty.textContent = "No saved games for this mode.";
+    return;
+  }
+  ui.startCurrentGamesEmpty.hidden = true;
+  for (const match of entries) {
+    ui.startCurrentGamesList.appendChild(buildCurrentGamesCard(match));
+  }
+}
+
+async function refreshCurrentGamesPanel() {
+  const panelNode = ui.startCurrentGamesPanel;
+  if (!panelNode) return;
+  if (!startModeLoadActive) {
+    if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
+    if (ui.startCurrentGamesEmpty) {
+      ui.startCurrentGamesEmpty.hidden = true;
+      ui.startCurrentGamesEmpty.textContent = "";
+    }
+    setStartCurrentGamesStatus("", false);
+    return;
+  }
+  const normalizedMode = normalizeStartModeMenuMode(startModeMenuMode);
+  if (!normalizedMode) return;
+  if (normalizedMode === "online") {
+    if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
+    if (ui.startCurrentGamesEmpty) {
+      ui.startCurrentGamesEmpty.hidden = false;
+      ui.startCurrentGamesEmpty.textContent = "Online saved matches will appear here in a later update.";
+    }
+    setStartCurrentGamesStatus("", false);
+    return;
+  }
+  const token = ++currentGamesRefreshToken;
+  const saves = getSavesBridge();
+  if (!saves) {
+    renderCurrentGamesList([]);
+    setStartCurrentGamesStatus("Device saves are unavailable on this build.", true);
+    return;
+  }
+  setStartCurrentGamesStatus("Loading...", false);
+  try {
+    const all = await saves.listMatches();
+    if (token !== currentGamesRefreshToken) return;
+    const deviceMatches = all
+      .filter((entry) => isDeviceCurrentGamesMatch(entry) && entry.mode === normalizedMode)
+      .sort(compareCurrentGamesMatches);
+    renderCurrentGamesList(deviceMatches);
+    setStartCurrentGamesStatus("", false);
+  } catch (err) {
+    if (token !== currentGamesRefreshToken) return;
+    console.warn("[current-games] Failed to read saved matches.", err);
+    renderCurrentGamesList([]);
+    setStartCurrentGamesStatus("Could not load saved matches. Try again.", true);
+  }
+}
+
+function setStartCurrentGamesPanelOpen(open, mode = null) {
+  if (!ui.startCurrentGamesPanel) return;
+  const shouldOpen = Boolean(open);
+  const normalizedMode = normalizeStartModeMenuMode(mode);
+  if (shouldOpen && normalizedMode) {
+    startModeMenuMode = normalizedMode;
+    startModeLoadActive = false;
+  }
+  if (!shouldOpen) {
+    startModeMenuMode = null;
+    startModeLoadActive = false;
+  }
+  ui.startCurrentGamesPanel.hidden = !shouldOpen;
+  if (shouldOpen) {
+    const anchorButton = getStartModeMenuButton(startModeMenuMode);
+    if (anchorButton) {
+      anchorButton.insertAdjacentElement("afterend", ui.startCurrentGamesPanel);
+    } else if (ui.startModeActions) {
+      ui.startModeActions.appendChild(ui.startCurrentGamesPanel);
+    }
+  }
+  if (ui.startCurrentGamesTitle) {
+    ui.startCurrentGamesTitle.textContent = getStartModeMenuTitle(startModeMenuMode);
+  }
+  if (ui.startModeNewBtn) ui.startModeNewBtn.disabled = !shouldOpen;
+  if (ui.startModeLoadBtn) ui.startModeLoadBtn.disabled = !shouldOpen;
+  if (!shouldOpen) {
+    if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
+    if (ui.startCurrentGamesEmpty) {
+      ui.startCurrentGamesEmpty.hidden = true;
+      ui.startCurrentGamesEmpty.textContent = "";
+    }
+    setStartCurrentGamesStatus("", false);
+    setCurrentGamesCardsDisabled(false);
+    return;
+  }
+  setStartOnlinePanelOpen(false);
+  setStartManualLoadVisible(false);
+  if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
+  if (ui.startCurrentGamesEmpty) {
+    ui.startCurrentGamesEmpty.hidden = true;
+    ui.startCurrentGamesEmpty.textContent = "";
+  }
+  setStartCurrentGamesStatus("", false);
+}
+
+function onStartModeNewGame() {
+  if (!state.ready) return;
+  const mode = normalizeStartModeMenuMode(startModeMenuMode);
+  if (!mode) return;
+  if (mode === "cpu") {
+    resetRtcSession({ closeConnection: true });
+    hideStartMenu();
+    startNewMatch({ playMode: "cpu" });
+    return;
+  }
+  if (mode === "local") {
+    resetRtcSession({ closeConnection: true });
+    hideStartMenu();
+    startNewMatch({ playMode: "friend", friendFlow: "hybrid" });
+    return;
+  }
+  if (mode === "online") {
+    setStartCurrentGamesPanelOpen(false);
+    void getOnlineStartController().onStartModeOnlineFromMenu();
+  }
+}
+
+function onStartModeLoadGame() {
+  const mode = normalizeStartModeMenuMode(startModeMenuMode);
+  if (!mode) return;
+  startModeLoadActive = !startModeLoadActive;
+  void refreshCurrentGamesPanel();
+}
+
+async function resumeSavedMatchFromCurrentGames(matchId) {
+  const resumeId = String(matchId || "").trim();
+  if (!resumeId || currentGamesResumeInFlight || currentGamesDeleteInFlight) return;
+  const mode = normalizeStartModeMenuMode(startModeMenuMode);
+  if (!mode || mode === "online") return;
+  const saves = getSavesBridge();
+  if (!saves) {
+    setStartCurrentGamesStatus("Device saves are unavailable on this build.", true);
+    return;
+  }
+  currentGamesResumeInFlight = true;
+  setCurrentGamesCardsDisabled(true);
+  setStartCurrentGamesStatus("Resuming...", false);
+  try {
+    const savedMatch = await saves.loadMatch(resumeId);
+    if (!savedMatch || !isDeviceCurrentGamesMatch(savedMatch) || savedMatch.mode !== mode) {
+      setStartCurrentGamesStatus("That saved match is no longer available.", true);
+      await refreshCurrentGamesPanel();
+      return;
+    }
+    const resumed =
+      savedMatch.mode === "cpu"
+        ? await resumeCpuMatchFromSavedMatch(savedMatch)
+        : await resumeLocalMatchFromSavedMatch(savedMatch);
+    if (resumed) {
+      setStartCurrentGamesStatus("", false);
+      return;
+    }
+    try {
+      await saves.deleteMatch(resumeId);
+    } catch (deleteErr) {
+      console.warn(`[current-games] Could not remove malformed save ${resumeId}.`, deleteErr);
+    }
+    setStartCurrentGamesStatus("Saved match could not be resumed and was removed.", true);
+    await refreshCurrentGamesPanel();
+  } catch (err) {
+    console.warn(`[current-games] Could not resume saved match ${resumeId}.`, err);
+    setStartCurrentGamesStatus("Could not resume saved match. Try again.", true);
+    await refreshCurrentGamesPanel();
+  } finally {
+    currentGamesResumeInFlight = false;
+    if (ui.startMenu && !ui.startMenu.hidden) {
+      setCurrentGamesCardsDisabled(false);
+    }
+  }
+}
+
+async function deleteSavedMatchFromCurrentGames(matchId) {
+  const deleteId = String(matchId || "").trim();
+  if (!deleteId || currentGamesDeleteInFlight || currentGamesResumeInFlight) return;
+  const mode = normalizeStartModeMenuMode(startModeMenuMode);
+  if (!mode || mode === "online") return;
+  const confirmed = window.confirm("Delete this saved game from this device?");
+  if (!confirmed) return;
+  const saves = getSavesBridge();
+  if (!saves) {
+    setStartCurrentGamesStatus("Device saves are unavailable on this build.", true);
+    return;
+  }
+  currentGamesDeleteInFlight = true;
+  setCurrentGamesCardsDisabled(true);
+  setStartCurrentGamesStatus("Deleting...", false);
+  try {
+    const deleted = await saves.deleteMatch(deleteId);
+    if (deleted) {
+      if (cpuAutosaveMatchId === deleteId) cpuAutosaveMatchId = null;
+      if (localAutosaveMatchId === deleteId) localAutosaveMatchId = null;
+      setStartCurrentGamesStatus("Saved game deleted.", false);
+    } else {
+      setStartCurrentGamesStatus("That saved game is no longer available.", true);
+    }
+    await refreshCurrentGamesPanel();
+  } catch (err) {
+    console.warn(`[current-games] Could not delete saved match ${deleteId}.`, err);
+    setStartCurrentGamesStatus("Could not delete saved game. Try again.", true);
+    await refreshCurrentGamesPanel();
+  } finally {
+    currentGamesDeleteInFlight = false;
+    if (ui.startMenu && !ui.startMenu.hidden) {
+      setCurrentGamesCardsDisabled(false);
+    }
+  }
+}
+
+function onStartCurrentGamesListClick(event) {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const deleteBtn = target.closest("button.current-games-delete");
+  if (deleteBtn && ui.startCurrentGamesList && ui.startCurrentGamesList.contains(deleteBtn)) {
+    const deleteId = String(deleteBtn.dataset.matchId || "").trim();
+    if (!deleteId) return;
+    void deleteSavedMatchFromCurrentGames(deleteId);
+    return;
+  }
+  const card = target.closest("button.current-games-card");
+  if (!card || !ui.startCurrentGamesList || !ui.startCurrentGamesList.contains(card)) return;
+  const matchId = String(card.dataset.matchId || "").trim();
+  if (!matchId) return;
+  void resumeSavedMatchFromCurrentGames(matchId);
+}
+
+function generateCpuSaveMatchId() {
+  const now = Date.now().toString(36).toUpperCase();
+  if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(6);
+    window.crypto.getRandomValues(bytes);
+    const suffix = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
+    return `cpu-${now}-${suffix}`;
+  }
+  return `cpu-${now}`;
+}
+
+function isCpuAutosaveSafeCheckpoint() {
+  if (!state.ready) return false;
+  if (state.playMode !== "cpu") return false;
+  if (!Array.isArray(state.players) || state.players.length !== 2) return false;
+  if (state.pendingSelection || state.awaitingDeckFlip || state.awaitingDecision) return false;
+  if (state.aiPreview || state.cpuPhase1PreviewCardId) return false;
+  if (state.turnReplay.active) return false;
+  return true;
+}
+
+function computeCpuSavedMatchStatus() {
+  if (state.matchOver) return "finished";
+  if (state.currentPlayer === 0 || state.roundOver) return "your-turn";
+  return "waiting";
+}
+
+function buildCpuSavedMatchFromState() {
+  if (!cpuAutosaveMatchId) {
+    cpuAutosaveMatchId = generateCpuSaveMatchId();
+  }
+  const playerName = String(state.players[0]?.name || "You").trim() || "You";
+  const cpuName = String(state.players[1]?.name || "CPU").trim() || "CPU";
+  return {
+    id: cpuAutosaveMatchId,
+    mode: "cpu",
+    title: CPU_SAVE_TITLE,
+    playerNames: [playerName, cpuName],
+    round: Number(state.gameNumber) || 1,
+    scoreSnapshot: {
+      p0: Number(state.players[0]?.score || 0),
+      p1: Number(state.players[1]?.score || 0),
+    },
+    turnOwner: state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : null,
+    status: computeCpuSavedMatchStatus(),
+    updatedAt: Date.now(),
+    finished: Boolean(state.matchOver),
+    gameSnapshot: encodeStateToCode(),
+  };
+}
+
+function normalizeCpuResumeStateForSafety() {
+  if (state.playMode !== "cpu") return;
+  const isInStableStateZones = (cardId) => {
+    if (!cardId) return false;
+    if (Array.isArray(state.field) && state.field.some((card) => card?.id === cardId)) return true;
+    if (Array.isArray(state.drawPile) && state.drawPile.some((card) => card?.id === cardId)) return true;
+    if (!Array.isArray(state.players)) return false;
+    for (const player of state.players) {
+      if (!player) continue;
+      if (Array.isArray(player.hand) && player.hand.some((card) => card?.id === cardId)) return true;
+      if (Array.isArray(player.captured) && player.captured.some((card) => card?.id === cardId)) return true;
+    }
+    return false;
+  };
+  const rehomeOrphanDrawCard = (card, sourceLabel) => {
+    const cardId = String(card?.id || "");
+    if (!cardId) return;
+    if (isInStableStateZones(cardId)) return;
+    const canonicalCard = CARD_BY_ID.get(cardId) || card;
+    if (!canonicalCard) return;
+    if (!Array.isArray(state.field)) state.field = [];
+    state.field.push(canonicalCard);
+    console.warn(`[cpu-save] Re-homed orphan draw-phase card ${cardId} from ${sourceLabel}.`);
+  };
+
+  const pending = state.pendingSelection;
+  if (pending && (pending.type === "drawMatch" || pending.type === "drawPlace")) {
+    rehomeOrphanDrawCard(pending.drawnCard, "pendingSelection");
+  }
+  if (state.awaitingDeckFlip) {
+    rehomeOrphanDrawCard(state.awaitingDeckFlip.drawnCard, "awaitingDeckFlip");
+  }
+
+  const hadTransientState =
+    Boolean(state.pendingSelection) ||
+    Boolean(state.awaitingDeckFlip) ||
+    Boolean(state.awaitingDecision) ||
+    Boolean(state.aiPreview) ||
+    Boolean(state.cpuPhase1PreviewCardId) ||
+    Boolean(state.turnReplay.active);
+  if (!hadTransientState) return;
+
+  clearRoundRuntimeTimers({
+    resetTurnReplayVisual: true,
+    resetDrawPreviewFxState: true,
+  });
+  state.pendingSelection = null;
+  state.awaitingDeckFlip = null;
+  state.awaitingDecision = null;
+  state.aiPreview = null;
+  state.cpuPhase1PreviewCardId = null;
+  state.drawPreview = {
+    cardId: null,
+    text: "Waiting for draw.",
+  };
+}
+
+async function persistCpuAutosave(reason, options = {}) {
+  const { force = false } = options;
+  if (state.playMode !== "cpu") return false;
+  if (state.matchOver) return false;
+  if (!force && !isCpuAutosaveSafeCheckpoint()) return false;
+  const saves = getSavesBridge();
+  if (!saves) return false;
+
+  let payload = null;
+  try {
+    payload = buildCpuSavedMatchFromState();
+    const saved = await saves.saveMatch(payload);
+    cpuAutosaveMatchId = saved.id;
+    return true;
+  } catch (err) {
+    console.warn(`[cpu-save] Autosave failed (${reason || "unspecified"}).`, err);
+    return false;
+  }
+}
+
+function requestCpuAutosave(reason, options = {}) {
+  void persistCpuAutosave(reason, options);
+}
+
+async function clearFinishedCpuAutosave(reason) {
+  const saves = getSavesBridge();
+  if (!saves) return false;
+  const finishedId = cpuAutosaveMatchId;
+  cpuAutosaveMatchId = null;
+  if (!finishedId) return false;
+  try {
+    return await saves.deleteMatch(finishedId);
+  } catch (err) {
+    console.warn(`[cpu-save] Could not clear finished CPU save (${reason || "unspecified"}).`, err);
+    return false;
+  }
+}
+
+async function resumeCpuMatchFromSavedMatch(savedMatch) {
+  if (!savedMatch || savedMatch.mode !== "cpu") return false;
+  try {
+    const snapshot = decodeGameCode(savedMatch.gameSnapshot);
+    if (snapshot.playMode !== "cpu") {
+      throw new Error("Saved snapshot mode is not CPU.");
+    }
+    applySnapshot(snapshot);
+    normalizeCpuResumeStateForSafety();
+    cpuAutosaveMatchId = savedMatch.id;
+    state.rtcWaiting = false;
+    hideStartMenu();
+    setCodePanelOpen(false);
+    renderAll();
+    if (!state.roundOver && !state.matchOver && !state.players[state.currentPlayer]?.isHuman) {
+      queueAITurn(420);
+    }
+    requestCpuAutosave("resume-normalized");
+    return true;
+  } catch (err) {
+    console.warn(`[cpu-save] Failed to resume saved CPU match ${savedMatch.id}.`, err);
+    return false;
+  }
+}
+
+function isLocalPassAndPlayMode() {
+  return isFriendMode() && !isOnlineFriendSessionActive();
+}
+
+function generateLocalSaveMatchId() {
+  const now = Date.now().toString(36).toUpperCase();
+  if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(6);
+    window.crypto.getRandomValues(bytes);
+    const suffix = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
+    return `local-${now}-${suffix}`;
+  }
+  return `local-${now}`;
+}
+
+function isLocalAutosaveSafeCheckpoint() {
+  if (!state.ready) return false;
+  if (!isLocalPassAndPlayMode()) return false;
+  if (!Array.isArray(state.players) || state.players.length !== 2) return false;
+  if (state.pendingSelection || state.awaitingDeckFlip || state.awaitingDecision) return false;
+  if (state.aiPreview || state.cpuPhase1PreviewCardId) return false;
+  if (state.turnReplay.active) return false;
+  return true;
+}
+
+function computeLocalSavedMatchStatus() {
+  if (state.matchOver) return "finished";
+  if (state.interstitial?.open) return "pass-device";
+  return "your-turn";
+}
+
+function buildLocalSavedMatchFromState() {
+  if (!localAutosaveMatchId) {
+    localAutosaveMatchId = generateLocalSaveMatchId();
+  }
+  const p0Name = String(state.players[0]?.name || "Player 1").trim() || "Player 1";
+  const p1Name = String(state.players[1]?.name || "Player 2").trim() || "Player 2";
+  return {
+    id: localAutosaveMatchId,
+    mode: "local",
+    title: LOCAL_SAVE_TITLE,
+    playerNames: [p0Name, p1Name],
+    round: Number(state.gameNumber) || 1,
+    scoreSnapshot: {
+      p0: Number(state.players[0]?.score || 0),
+      p1: Number(state.players[1]?.score || 0),
+    },
+    turnOwner: state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : null,
+    status: computeLocalSavedMatchStatus(),
+    updatedAt: Date.now(),
+    finished: Boolean(state.matchOver),
+    gameSnapshot: encodeStateToCode(),
+  };
+}
+
+function normalizeLocalResumeStateForSafety() {
+  if (!isFriendMode()) return;
+  if (isOnlineFriendSessionActive()) return;
+
+  const isInStableStateZones = (cardId) => {
+    if (!cardId) return false;
+    if (Array.isArray(state.field) && state.field.some((card) => card?.id === cardId)) return true;
+    if (Array.isArray(state.drawPile) && state.drawPile.some((card) => card?.id === cardId)) return true;
+    if (!Array.isArray(state.players)) return false;
+    for (const player of state.players) {
+      if (!player) continue;
+      if (Array.isArray(player.hand) && player.hand.some((card) => card?.id === cardId)) return true;
+      if (Array.isArray(player.captured) && player.captured.some((card) => card?.id === cardId)) return true;
+    }
+    return false;
+  };
+  const rehomeOrphanDrawCard = (card, sourceLabel) => {
+    const cardId = String(card?.id || "");
+    if (!cardId) return;
+    if (isInStableStateZones(cardId)) return;
+    const canonicalCard = CARD_BY_ID.get(cardId) || card;
+    if (!canonicalCard) return;
+    if (!Array.isArray(state.field)) state.field = [];
+    state.field.push(canonicalCard);
+    console.warn(`[local-save] Re-homed orphan draw-phase card ${cardId} from ${sourceLabel}.`);
+  };
+
+  const pending = state.pendingSelection;
+  if (pending && (pending.type === "drawMatch" || pending.type === "drawPlace")) {
+    rehomeOrphanDrawCard(pending.drawnCard, "pendingSelection");
+  }
+  if (state.awaitingDeckFlip) {
+    rehomeOrphanDrawCard(state.awaitingDeckFlip.drawnCard, "awaitingDeckFlip");
+  }
+
+  const hadTransientState =
+    Boolean(state.pendingSelection) ||
+    Boolean(state.awaitingDeckFlip) ||
+    Boolean(state.awaitingDecision) ||
+    Boolean(state.aiPreview) ||
+    Boolean(state.cpuPhase1PreviewCardId) ||
+    Boolean(state.turnReplay.active);
+
+  if (hadTransientState) {
+    clearRoundRuntimeTimers({
+      resetTurnReplayVisual: true,
+      resetDrawPreviewFxState: true,
+    });
+    state.pendingSelection = null;
+    state.awaitingDeckFlip = null;
+    state.awaitingDecision = null;
+    state.aiPreview = null;
+    state.cpuPhase1PreviewCardId = null;
+    state.drawPreview = {
+      cardId: null,
+      text: "Waiting for draw.",
+    };
+  }
+
+  if (!state.roundOver && !state.matchOver) {
+    const nextPlayerIndex = state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : 0;
+    state.viewerPlayerIndex = nextPlayerIndex === 0 ? 1 : 0;
+    setFriendInterstitialOpen(true, nextPlayerIndex);
+  }
+}
+
+async function persistLocalAutosave(reason, options = {}) {
+  const { force = false } = options;
+  if (!isLocalPassAndPlayMode()) return false;
+  if (state.matchOver) return false;
+  if (!force && !isLocalAutosaveSafeCheckpoint()) return false;
+  const saves = getSavesBridge();
+  if (!saves) return false;
+  try {
+    const payload = buildLocalSavedMatchFromState();
+    const saved = await saves.saveMatch(payload);
+    localAutosaveMatchId = saved.id;
+    return true;
+  } catch (err) {
+    console.warn(`[local-save] Autosave failed (${reason || "unspecified"}).`, err);
+    return false;
+  }
+}
+
+function requestLocalAutosave(reason, options = {}) {
+  void persistLocalAutosave(reason, options);
+}
+
+async function clearFinishedLocalAutosave(reason) {
+  const saves = getSavesBridge();
+  if (!saves) return false;
+  const finishedId = localAutosaveMatchId;
+  localAutosaveMatchId = null;
+  if (!finishedId) return false;
+  try {
+    return await saves.deleteMatch(finishedId);
+  } catch (err) {
+    console.warn(`[local-save] Could not clear finished Local save (${reason || "unspecified"}).`, err);
+    return false;
+  }
+}
+
+async function resumeLocalMatchFromSavedMatch(savedMatch) {
+  if (!savedMatch || savedMatch.mode !== "local") return false;
+  if (savedMatch.finished) return false;
+  try {
+    resetRtcSession({ closeConnection: true });
+    const snapshot = decodeGameCode(savedMatch.gameSnapshot);
+    if (snapshot.playMode !== "friend") {
+      throw new Error("Saved snapshot mode is not Local Multiplayer.");
+    }
+    applySnapshot(snapshot);
+    // Local resume must not inherit stale online RTC metadata from snapshots.
+    resetRtcSession({ closeConnection: true });
+    cpuAutosaveMatchId = null;
+    localAutosaveMatchId = savedMatch.id;
+    state.rtcWaiting = false;
+    hideStartMenu();
+    normalizeLocalResumeStateForSafety();
+    setCodePanelOpen(false);
+    renderAll();
+    requestLocalAutosave("resume-normalized");
+    return true;
+  } catch (err) {
+    console.warn(`[local-save] Failed to resume saved Local match ${savedMatch.id}.`, err);
+    return false;
+  }
+}
+
 function renderRtcStatusBadge() {
   return getOnlineStartController().renderRtcStatusBadge();
 }
@@ -840,6 +1635,7 @@ function cacheUI() {
   ui.onlineRoomChip = document.getElementById("online-room-chip");
   ui.onlineLeaveBtn = document.getElementById("online-leave-btn");
   ui.gameSummaryToggle = document.getElementById("game-summary-toggle");
+  ui.mainMenuBtn = document.getElementById("main-menu-btn");
   ui.gameSummaryPanel = document.getElementById("game-summary-panel");
   ui.roundSummaryBody = document.getElementById("round-summary-body");
   ui.cpuHandCount = document.getElementById("cpu-hand-count");
@@ -890,9 +1686,17 @@ function cacheUI() {
   ui.loadCodeBtn = document.getElementById("load-code-btn");
   ui.closeCodeBtn = document.getElementById("close-code-btn");
   ui.startMenu = document.getElementById("start-menu");
+  ui.startModeActions = document.getElementById("start-mode-actions");
   ui.startModeCpuBtn = document.getElementById("start-mode-cpu-btn");
   ui.startModeFriendBtn = document.getElementById("start-mode-friend-btn");
   ui.startModeOnlineBtn = document.getElementById("start-mode-online-btn");
+  ui.startCurrentGamesPanel = document.getElementById("start-current-games-panel");
+  ui.startCurrentGamesTitle = document.getElementById("start-current-games-title");
+  ui.startModeNewBtn = document.getElementById("start-mode-new-btn");
+  ui.startModeLoadBtn = document.getElementById("start-mode-load-btn");
+  ui.startCurrentGamesStatus = document.getElementById("start-current-games-status");
+  ui.startCurrentGamesEmpty = document.getElementById("start-current-games-empty");
+  ui.startCurrentGamesList = document.getElementById("start-current-games-list");
   ui.startSubtitle = document.getElementById("start-subtitle");
   ui.startExpiredNote = document.getElementById("start-expired-note");
   ui.startExpiredNoteText = document.getElementById("start-expired-note-text");
@@ -909,9 +1713,6 @@ function cacheUI() {
   ui.onlineRoomCodeInput = document.getElementById("online-room-code-input");
   ui.onlineRoomDisplay = document.getElementById("online-room-display");
   ui.onlineRoomCodeText = document.getElementById("online-room-code-text");
-  ui.onlineBookmarkPrompt = document.getElementById("online-bookmark-prompt");
-  ui.onlineBookmarkCopyBtn = document.getElementById("online-bookmark-copy-btn");
-  ui.onlineBookmarkDismissBtn = document.getElementById("online-bookmark-dismiss-btn");
   ui.startOnlineStatus = document.getElementById("start-online-status");
   ui.startLoadActions = document.getElementById("start-load-actions");
   ui.startLoadBtn = document.getElementById("start-load-btn");
@@ -940,6 +1741,7 @@ function bindUI() {
   ui.drawPreview?.addEventListener("click", onDrawPreviewClick);
   ui.contextZone.addEventListener("click", onContextActionClick);
   ui.gameSummaryToggle?.addEventListener("click", onToggleGameSummaryPanel);
+  ui.mainMenuBtn?.addEventListener("click", onMainMenuFromHeader);
   ui.onlineLeaveBtn?.addEventListener("click", onFriendBackToMenu);
   ui.logToggle?.addEventListener("click", onToggleLogPanel);
   ui.codeToggle?.addEventListener("click", onToggleCodePanel);
@@ -955,14 +1757,15 @@ function bindUI() {
   ui.startModeCpuBtn?.addEventListener("click", onStartModeCpuFromMenu);
   ui.startModeFriendBtn?.addEventListener("click", onStartModeFriendFromMenu);
   ui.startModeOnlineBtn?.addEventListener("click", onStartModeOnlineFromMenu);
+  ui.startModeNewBtn?.addEventListener("click", onStartModeNewGame);
+  ui.startModeLoadBtn?.addEventListener("click", onStartModeLoadGame);
+  ui.startCurrentGamesList?.addEventListener("click", onStartCurrentGamesListClick);
   ui.startExpiredNoteClose?.addEventListener("click", onStartExpiredNoteDismiss);
   ui.startResumeBtn?.addEventListener("click", onStartResumeFromCard);
   ui.startResumeLeaveBtn?.addEventListener("click", onStartResumeLeaveFromCard);
   ui.onlineHostBtn?.addEventListener("click", onOnlineHostFromMenu);
   ui.onlineJoinBtn?.addEventListener("click", onOnlineJoinFromMenu);
   ui.onlineBackBtn?.addEventListener("click", onOnlineBackFromMenu);
-  ui.onlineBookmarkCopyBtn?.addEventListener("click", onOnlineBookmarkCopyUrl);
-  ui.onlineBookmarkDismissBtn?.addEventListener("click", onOnlineBookmarkDismiss);
   ui.onlineRoomChip?.addEventListener("click", onOnlineRoomChipCopy);
   ui.onlineRoomCodeInput?.addEventListener("input", () => {
     if (!ui.onlineRoomCodeInput) return;
@@ -998,6 +1801,12 @@ function preloadSheets() {
 }
 
 function showStartMenu() {
+  if (state.playMode === "cpu" && Array.isArray(state.players) && state.players.length === 2) {
+    requestCpuAutosave("show-start-menu");
+  }
+  if (isLocalPassAndPlayMode() && Array.isArray(state.players) && state.players.length === 2) {
+    requestLocalAutosave("show-start-menu");
+  }
   if (ui.startMenu) {
     ui.startMenu.hidden = false;
   }
@@ -1007,17 +1816,20 @@ function showStartMenu() {
   setLogPanelOpen(false);
   setGameSummaryPanelOpen(false);
   setCodePanelOpen(false);
+  setStartCurrentGamesPanelOpen(false);
   setCodeStatus("", false, "start");
   if (document.title !== "Koi-Koi") {
     document.title = "Koi-Koi";
   }
   refreshStartMenuAsyncUx();
+  refreshCurrentGamesPanel();
 }
 
 function hideStartMenu() {
   if (ui.startMenu) {
     ui.startMenu.hidden = true;
   }
+  setStartCurrentGamesPanelOpen(false);
   setStartOnlinePanelOpen(false);
   setStartManualLoadVisible(false);
   setFriendInterstitialOpen(false);
@@ -1039,9 +1851,11 @@ function setFriendManualLoadVisible(open) {
 }
 
 function setCodePanelOpen(open) {
-  if (!ui.codePanel || !ui.codeToggle) return;
+  if (!ui.codePanel) return;
   ui.codePanel.hidden = !open;
-  ui.codeToggle.textContent = open ? "Hide Code" : "Code";
+  if (ui.codeToggle) {
+    ui.codeToggle.textContent = open ? "Hide Code" : "Code";
+  }
   if (!open && ui.codeAdvanced && ui.toggleAdvancedBtn) {
     ui.codeAdvanced.hidden = true;
     ui.toggleAdvancedBtn.textContent = "Advanced";
@@ -1080,6 +1894,10 @@ function onToggleCodePanel() {
       setCodeStatus("", false, "panel");
     }
   }
+}
+
+function onMainMenuFromHeader() {
+  showStartMenu();
 }
 
 function onToggleCodeAdvanced() {
@@ -1251,20 +2069,29 @@ function onLoadCodeFromPanel() {
 
 function onStartModeCpuFromMenu() {
   if (!state.ready) return;
-  resetRtcSession({ closeConnection: true });
-  hideStartMenu();
-  startNewMatch({ playMode: "cpu" });
+  if (!ui.startCurrentGamesPanel?.hidden && startModeMenuMode === "cpu") {
+    setStartCurrentGamesPanelOpen(false);
+    return;
+  }
+  setStartCurrentGamesPanelOpen(true, "cpu");
 }
 
 function onStartModeFriendFromMenu() {
   if (!state.ready) return;
-  resetRtcSession({ closeConnection: true });
-  hideStartMenu();
-  startNewMatch({ playMode: "friend", friendFlow: "hybrid" });
+  if (!ui.startCurrentGamesPanel?.hidden && startModeMenuMode === "local") {
+    setStartCurrentGamesPanelOpen(false);
+    return;
+  }
+  setStartCurrentGamesPanelOpen(true, "local");
 }
 
 async function onStartModeOnlineFromMenu() {
-  return getOnlineStartController().onStartModeOnlineFromMenu();
+  if (!state.ready) return;
+  if (!ui.startCurrentGamesPanel?.hidden && startModeMenuMode === "online") {
+    setStartCurrentGamesPanelOpen(false);
+    return;
+  }
+  setStartCurrentGamesPanelOpen(true, "online");
 }
 
 async function onOnlineHostFromMenu() {
@@ -1289,14 +2116,6 @@ async function onStartResumeFromCard() {
 
 async function onStartResumeLeaveFromCard() {
   return getOnlineStartController().onStartResumeLeaveFromCard();
-}
-
-async function onOnlineBookmarkCopyUrl() {
-  return getOnlineStartController().onOnlineBookmarkCopyUrl();
-}
-
-function onOnlineBookmarkDismiss() {
-  return getOnlineStartController().onOnlineBookmarkDismiss();
 }
 
 async function startOnlineSession(role) {
@@ -1336,6 +2155,7 @@ function handleIncomingRtcSignal(signal) {
 }
 
 function onStartLoadFromMenu() {
+  setStartCurrentGamesPanelOpen(false);
   return getCodeIoController().onStartLoadFromMenu();
 }
 
@@ -1408,6 +2228,14 @@ function loadCodeIntoGame(rawInput, target = "panel", options = {}) {
     state.rtcWaiting = false;
     hideStartMenu();
     setCodePanelOpen(false);
+    if (snapshot.playMode === "cpu") {
+      if (!cpuAutosaveMatchId) {
+        cpuAutosaveMatchId = generateCpuSaveMatchId();
+      }
+      requestCpuAutosave("manual-code-load");
+    } else {
+      cpuAutosaveMatchId = null;
+    }
     if (snapshot.playMode === "friend" && snapshot.lastExportMeta) {
       const playerLabel = `Player ${snapshot.lastExportMeta.playerIndex + 1}`;
       setCodeStatus(`Turn link loaded (${playerLabel}, move ${snapshot.lastExportMeta.turnNumber}).`, false, target);
@@ -1477,898 +2305,87 @@ function createPlayer(name, isHuman, roleLabel = name) {
 }
 
 function encodeStateToCode() {
-  const snapshot = buildSnapshot();
-  const json = JSON.stringify(snapshot);
-  const payload = encodeBase64UrlUtf8(json);
-  const checksum = computeCodeChecksum(payload);
-  return `${SAVE_CODE_PREFIX}.${payload}.${checksum}`;
+  return getSnapshotCodec().encodeStateToCode();
 }
 
 function decodeGameCode(code, options = {}) {
-  const normalized = String(code || "").trim();
-  const parts = normalized.split(".");
-  if (parts.length !== 3) {
-    throw new Error("Bad format. Expected prefix.payload.checksum");
-  }
-  const [prefix, payload, checksum] = parts;
-  const expectedVersion = SAVE_CODE_PREFIX_VERSION[prefix];
-  if (!expectedVersion) {
-    throw new Error("Unknown code prefix");
-  }
-  const expected = computeCodeChecksum(payload);
-  if (checksum.toUpperCase() !== expected) {
-    throw new Error("Checksum mismatch");
-  }
-
-  let parsed;
-  try {
-    const json = decodeBase64UrlUtf8(payload);
-    parsed = JSON.parse(json);
-  } catch (err) {
-    throw new Error(`Invalid payload: ${err.message}`);
-  }
-
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Invalid payload object");
-  }
-  if (parsed.v !== expectedVersion) {
-    throw new Error(`Version mismatch for ${prefix}`);
-  }
-
-  const migrated = migrateSnapshotToLatest(parsed);
-  validateSnapshot(migrated, options);
-  return migrated;
+  return getSnapshotCodec().decodeGameCode(code, options);
 }
 
 function migrateSnapshotToLatest(snapshot) {
-  if (!snapshot || typeof snapshot !== "object") {
-    throw new Error("Invalid payload object");
-  }
-  let migrated = { ...snapshot };
-  while (SAVE_MIGRATIONS[migrated.v]) {
-    migrated = SAVE_MIGRATIONS[migrated.v](migrated);
-  }
-  return migrated;
+  return getSnapshotCodec().migrateSnapshotToLatest(snapshot);
 }
 
 function migrateV2SnapshotToV3(snapshot) {
-  const players = Array.isArray(snapshot.players) ? snapshot.players.map((player) => ({ ...player })) : [];
-  return {
-    ...snapshot,
-    v: 3,
-    playMode: snapshot.playMode === "friend" ? "friend" : "cpu",
-    friendFlow:
-      snapshot.friendFlow === "hotseat" || snapshot.friendFlow === "code" || snapshot.friendFlow === "hybrid"
-        ? snapshot.friendFlow
-        : "hybrid",
-    viewerPlayerIndex:
-      snapshot.viewerPlayerIndex === 0 || snapshot.viewerPlayerIndex === 1
-        ? snapshot.viewerPlayerIndex
-        : snapshot.currentPlayer === 0 || snapshot.currentPlayer === 1
-          ? snapshot.currentPlayer
-          : 0,
-    interstitial: snapshot.interstitial && typeof snapshot.interstitial === "object"
-      ? {
-          open: Boolean(snapshot.interstitial.open),
-          nextPlayerIndex:
-            snapshot.interstitial.nextPlayerIndex === 0 || snapshot.interstitial.nextPlayerIndex === 1
-              ? snapshot.interstitial.nextPlayerIndex
-              : null,
-        }
-      : { open: false, nextPlayerIndex: null },
-    roundTransition: createClosedRoundTransition(),
-    turnCheckpointReady: Boolean(snapshot.turnCheckpointReady),
-    lastExportMeta: null,
-    lastTurnRecap: null,
-    aiProfile: AI_PROFILES[snapshot.aiProfile] ? snapshot.aiProfile : DEFAULT_AI_PROFILE,
-    firstYakuPlayer:
-      snapshot.firstYakuPlayer === 0 || snapshot.firstYakuPlayer === 1 ? snapshot.firstYakuPlayer : null,
-    lastKoiCaller: snapshot.lastKoiCaller === 0 || snapshot.lastKoiCaller === 1 ? snapshot.lastKoiCaller : null,
-    roundSpecialTwoXPlayer:
-      snapshot.roundSpecialTwoXPlayer === 0 || snapshot.roundSpecialTwoXPlayer === 1
-        ? snapshot.roundSpecialTwoXPlayer
-        : null,
-    nextRoundSpecialTwoXPlayer:
-      snapshot.nextRoundSpecialTwoXPlayer === 0 || snapshot.nextRoundSpecialTwoXPlayer === 1
-        ? snapshot.nextRoundSpecialTwoXPlayer
-        : null,
-    roundLeaderAtStart:
-      snapshot.roundLeaderAtStart === 0 || snapshot.roundLeaderAtStart === 1 ? snapshot.roundLeaderAtStart : null,
-    previousRoundWinner:
-      snapshot.previousRoundWinner === 0 || snapshot.previousRoundWinner === 1 ? snapshot.previousRoundWinner : null,
-    previousRoundMultiplier: Number.isFinite(snapshot.previousRoundMultiplier) ? snapshot.previousRoundMultiplier : null,
-    drawPreview:
-      snapshot.drawPreview && typeof snapshot.drawPreview === "object"
-        ? {
-            cardId: snapshot.drawPreview.cardId || null,
-            text: String(snapshot.drawPreview.text || ""),
-          }
-        : {
-            cardId: null,
-            text: "Waiting for draw.",
-          },
-    actionLog: Array.isArray(snapshot.actionLog) ? snapshot.actionLog.map((line) => String(line)) : [],
-    moveCounts:
-      Array.isArray(snapshot.moveCounts) && snapshot.moveCounts.length === 2
-        ? [snapshot.moveCounts[0], snapshot.moveCounts[1]]
-        : [0, 0],
-    players,
-    pendingSelection: snapshot.pendingSelection || null,
-    awaitingDeckFlip: snapshot.awaitingDeckFlip || null,
-    awaitingDecision: snapshot.awaitingDecision || null,
-    aiPreview: snapshot.aiPreview || null,
-    cpuPhase1PreviewCardId: snapshot.cpuPhase1PreviewCardId || null,
-  };
+  return getSnapshotCodec().migrateV2SnapshotToV3(snapshot);
 }
 
 function buildSnapshot() {
-  const checkpointReady = computeTurnCheckpointReady();
-  state.turnCheckpointReady = checkpointReady;
-  return {
-    v: SAVE_CODE_VERSION,
-    playMode: state.playMode,
-    friendFlow: state.friendFlow,
-    viewerPlayerIndex: state.viewerPlayerIndex,
-    interstitial: {
-      open: Boolean(state.interstitial?.open),
-      nextPlayerIndex:
-        state.interstitial?.nextPlayerIndex === null || state.interstitial?.nextPlayerIndex === undefined
-          ? null
-          : state.interstitial.nextPlayerIndex,
-    },
-    roundTransition: serializeRoundTransition(state.roundTransition),
-    turnCheckpointReady: checkpointReady,
-    lastExportMeta: state.lastExportMeta
-      ? {
-          turnNumber: state.lastExportMeta.turnNumber,
-          playerIndex: state.lastExportMeta.playerIndex,
-        }
-      : null,
-    lastTurnRecap: state.lastTurnRecap ? { ...state.lastTurnRecap } : null,
-    aiProfile: state.aiProfile,
-    gameNumber: state.gameNumber,
-    maxGames: state.maxGames,
-    dealer: state.dealer,
-    currentPlayer: state.currentPlayer,
-    tableMultiplier: state.tableMultiplier,
-    lastKoiCaller: state.lastKoiCaller,
-    firstYakuPlayer: state.firstYakuPlayer,
-    roundSpecialTwoXPlayer: state.roundSpecialTwoXPlayer,
-    nextRoundSpecialTwoXPlayer: state.nextRoundSpecialTwoXPlayer,
-    roundLeaderAtStart: state.roundLeaderAtStart,
-    previousRoundWinner: state.previousRoundWinner,
-    previousRoundMultiplier: state.previousRoundMultiplier,
-    roundOver: state.roundOver,
-    matchOver: state.matchOver,
-    message: state.message,
-    drawPreview: {
-      cardId: state.drawPreview?.cardId || null,
-      text: state.drawPreview?.text || "",
-    },
-    actionLog: [...state.actionLog],
-    moveCounts: [...state.moveCounts],
-    roundHistory: state.roundHistory.map((entry) => ({ ...entry })),
-    field: state.field.map((card) => card.id),
-    drawPile: state.drawPile.map((card) => card.id),
-    players: state.players.map((player) => ({
-      name: player.name,
-      roleLabel: player.roleLabel,
-      isHuman: player.isHuman,
-      score: player.score,
-      hand: player.hand.map((card) => card.id),
-      captured: player.captured.map((card) => card.id),
-      yakuSeen: [...player.yakuSeen],
-    })),
-    pendingSelection: serializePendingSelection(state.pendingSelection),
-    awaitingDeckFlip: serializeAwaitingDeckFlip(state.awaitingDeckFlip),
-    awaitingDecision: serializeAwaitingDecision(state.awaitingDecision),
-    aiPreview: serializeAiPreview(state.aiPreview),
-    cpuPhase1PreviewCardId: state.cpuPhase1PreviewCardId || null,
-  };
-}
-
-function serializePendingSelection(pending) {
-  if (!pending) return null;
-  if (pending.type === "handMatch" || pending.type === "handPlace") {
-    return {
-      type: pending.type,
-      playerIndex: pending.playerIndex,
-      cardId: pending.cardId,
-      options: [...pending.options],
-    };
-  }
-  if (pending.type === "drawMatch" || pending.type === "drawPlace") {
-    return {
-      type: pending.type,
-      playerIndex: pending.playerIndex,
-      drawnCardId: pending.drawnCard?.id || null,
-      moveNumber: pending.moveNumber,
-      options: [...pending.options],
-    };
-  }
-  return null;
-}
-
-function serializeAwaitingDeckFlip(flip) {
-  if (!flip) return null;
-  return {
-    playerIndex: flip.playerIndex,
-    moveNumber: flip.moveNumber,
-    drawnCardId: flip.drawnCard?.id || null,
-    revealed: Boolean(flip.revealed),
-  };
-}
-
-function serializeAwaitingDecision(decision) {
-  if (!decision) return null;
-  return {
-    ...decision,
-  };
-}
-
-function serializeAiPreview(aiPreview) {
-  if (!aiPreview) return null;
-  return {
-    options: [...(aiPreview.options || [])],
-    prompt: String(aiPreview.prompt || ""),
-  };
-}
-
-function serializeRoundTransition(roundTransition) {
-  if (!roundTransition || typeof roundTransition !== "object") {
-    return createClosedRoundTransition();
-  }
-  return {
-    open: Boolean(roundTransition.open),
-    winnerIndex:
-      roundTransition.winnerIndex === null || roundTransition.winnerIndex === undefined ? null : roundTransition.winnerIndex,
-    pointsAwarded: Math.max(0, Number(roundTransition.pointsAwarded) || 0),
-    noScore: Boolean(roundTransition.noScore),
-    nextGameNumber:
-      roundTransition.nextGameNumber === null || roundTransition.nextGameNumber === undefined
-        ? null
-        : roundTransition.nextGameNumber,
-    acks: {
-      p0: Boolean(roundTransition.acks?.p0),
-      p1: Boolean(roundTransition.acks?.p1),
-      local: Boolean(roundTransition.acks?.local),
-    },
-  };
+  return getSnapshotCodec().buildSnapshot();
 }
 
 function validateSnapshot(snapshot, options = {}) {
-  const allowMissingDrawPile = Boolean(options.allowMissingDrawPile);
-  if (!snapshot || typeof snapshot !== "object") {
-    throw new Error("Snapshot must be an object");
-  }
-  const snapshotVersion = asInt(snapshot.v, "v");
-  if (!SUPPORTED_SAVE_VERSIONS.has(snapshotVersion)) {
-    throw new Error(`Unsupported version ${snapshotVersion}`);
-  }
-  if (snapshotVersion >= 3) {
-    validatePlayMode(snapshot.playMode, "playMode");
-    validateFriendFlow(snapshot.friendFlow, "friendFlow");
-    ensureNullablePlayerIndex(snapshot.viewerPlayerIndex, "viewerPlayerIndex");
-    validateInterstitialSnapshot(snapshot.interstitial);
-    if (typeof snapshot.turnCheckpointReady !== "boolean") {
-      throw new Error("turnCheckpointReady must be boolean");
-    }
-    if (snapshot.lastExportMeta !== null && snapshot.lastExportMeta !== undefined) {
-      validateLastExportMetaSnapshot(snapshot.lastExportMeta);
-    }
-    if (snapshot.lastTurnRecap !== null && snapshot.lastTurnRecap !== undefined) {
-      validateTurnRecapSnapshot(snapshot.lastTurnRecap);
-    }
-  }
-  if (!Array.isArray(snapshot.players) || snapshot.players.length !== 2) {
-    throw new Error("Snapshot must contain exactly two players");
-  }
-  if (!Array.isArray(snapshot.field)) {
-    throw new Error("Snapshot must include a field array");
-  }
-  if (!allowMissingDrawPile && !Array.isArray(snapshot.drawPile)) {
-    throw new Error("Snapshot must include a draw pile array");
-  }
-  if (allowMissingDrawPile && snapshot.drawPile !== undefined && snapshot.drawPile !== null && !Array.isArray(snapshot.drawPile)) {
-    throw new Error("Snapshot draw pile must be an array when present");
-  }
-  if (!Array.isArray(snapshot.moveCounts) || snapshot.moveCounts.length !== 2) {
-    throw new Error("Snapshot moveCounts must have two entries");
-  }
-  if (!Array.isArray(snapshot.roundHistory)) {
-    throw new Error("Snapshot roundHistory must be an array");
-  }
-
-  const maxGames = asInt(snapshot.maxGames, "maxGames");
-  const gameNumber = asInt(snapshot.gameNumber, "gameNumber");
-  if (maxGames < 1 || maxGames > 24) {
-    throw new Error("maxGames out of range");
-  }
-  if (gameNumber < 1 || gameNumber > maxGames) {
-    throw new Error("gameNumber out of range");
-  }
-
-  const dealer = asPlayerIndex(snapshot.dealer, "dealer");
-  const currentPlayer = asPlayerIndex(snapshot.currentPlayer, "currentPlayer");
-  const tableMultiplier = asInt(snapshot.tableMultiplier, "tableMultiplier");
-  if (tableMultiplier < 1 || tableMultiplier > 4) {
-    throw new Error("tableMultiplier out of range");
-  }
-
-  ensureNullablePlayerIndex(snapshot.lastKoiCaller, "lastKoiCaller");
-  ensureNullablePlayerIndex(snapshot.firstYakuPlayer, "firstYakuPlayer");
-  ensureNullablePlayerIndex(snapshot.roundSpecialTwoXPlayer, "roundSpecialTwoXPlayer");
-  ensureNullablePlayerIndex(snapshot.nextRoundSpecialTwoXPlayer, "nextRoundSpecialTwoXPlayer");
-  ensureNullablePlayerIndex(snapshot.roundLeaderAtStart, "roundLeaderAtStart");
-  ensureNullablePlayerIndex(snapshot.previousRoundWinner, "previousRoundWinner");
-  snapshot.roundHistory.forEach((entry, idx) => validateRoundHistoryEntry(entry, idx, maxGames));
-  if (snapshotVersion >= 3 && snapshot.roundTransition !== null && snapshot.roundTransition !== undefined) {
-    validateRoundTransitionSnapshot(snapshot.roundTransition, maxGames);
-  }
-
-  // Force card-id validity here and duplicate checks in applySnapshot.
-  snapshot.field.forEach((id, idx) => ensureCardId(id, `field[${idx}]`));
-  if (Array.isArray(snapshot.drawPile)) {
-    snapshot.drawPile.forEach((id, idx) => ensureCardId(id, `drawPile[${idx}]`));
-  }
-  snapshot.players.forEach((player, playerIndex) => {
-    if (!player || typeof player !== "object") {
-      throw new Error(`players[${playerIndex}] must be an object`);
-    }
-    if (player.name !== undefined && typeof player.name !== "string") {
-      throw new Error(`players[${playerIndex}].name must be a string`);
-    }
-    if (player.roleLabel !== undefined && typeof player.roleLabel !== "string") {
-      throw new Error(`players[${playerIndex}].roleLabel must be a string`);
-    }
-    if (player.isHuman !== undefined && typeof player.isHuman !== "boolean") {
-      throw new Error(`players[${playerIndex}].isHuman must be boolean`);
-    }
-    asInt(player.score, `players[${playerIndex}].score`);
-    if (!Array.isArray(player.hand) || !Array.isArray(player.captured)) {
-      throw new Error(`players[${playerIndex}] hand/captured must be arrays`);
-    }
-    if (player.yakuSeen !== undefined && !Array.isArray(player.yakuSeen)) {
-      throw new Error(`players[${playerIndex}].yakuSeen must be an array`);
-    }
-    player.hand.forEach((id, idx) => ensureCardId(id, `players[${playerIndex}].hand[${idx}]`));
-    player.captured.forEach((id, idx) => ensureCardId(id, `players[${playerIndex}].captured[${idx}]`));
-  });
-
-  if (snapshot.pendingSelection !== null && snapshot.pendingSelection !== undefined) {
-    validatePendingSelectionSnapshot(snapshot.pendingSelection);
-  }
-  if (snapshot.awaitingDeckFlip !== null && snapshot.awaitingDeckFlip !== undefined) {
-    validateAwaitingDeckFlipSnapshot(snapshot.awaitingDeckFlip);
-  }
-  if (snapshot.awaitingDecision !== null && snapshot.awaitingDecision !== undefined) {
-    validateAwaitingDecisionSnapshot(snapshot.awaitingDecision);
-  }
-
-  // Keep explicit references in case we later add stricter rules.
-  void snapshotVersion;
-  void dealer;
-  void currentPlayer;
-}
-
-function validatePlayMode(value, label) {
-  if (value !== "cpu" && value !== "friend") {
-    throw new Error(`${label} must be cpu or friend`);
-  }
-}
-
-function validateFriendFlow(value, label) {
-  if (value !== "hotseat" && value !== "code" && value !== "hybrid") {
-    throw new Error(`${label} must be hotseat, code, or hybrid`);
-  }
-}
-
-function validateInterstitialSnapshot(interstitial) {
-  if (!interstitial || typeof interstitial !== "object") {
-    throw new Error("interstitial must be an object");
-  }
-  if (typeof interstitial.open !== "boolean") {
-    throw new Error("interstitial.open must be boolean");
-  }
-  ensureNullablePlayerIndex(interstitial.nextPlayerIndex, "interstitial.nextPlayerIndex");
-}
-
-function validateRoundTransitionSnapshot(roundTransition, maxGames) {
-  if (!roundTransition || typeof roundTransition !== "object") {
-    throw new Error("roundTransition must be an object");
-  }
-  if (typeof roundTransition.open !== "boolean") {
-    throw new Error("roundTransition.open must be boolean");
-  }
-  ensureNullablePlayerIndex(roundTransition.winnerIndex, "roundTransition.winnerIndex");
-  if (roundTransition.pointsAwarded !== null && roundTransition.pointsAwarded !== undefined) {
-    const points = asInt(roundTransition.pointsAwarded, "roundTransition.pointsAwarded");
-    if (points < 0) throw new Error("roundTransition.pointsAwarded must be non-negative");
-  }
-  if (typeof roundTransition.noScore !== "boolean") {
-    throw new Error("roundTransition.noScore must be boolean");
-  }
-  if (roundTransition.nextGameNumber !== null && roundTransition.nextGameNumber !== undefined) {
-    const next = asInt(roundTransition.nextGameNumber, "roundTransition.nextGameNumber");
-    if (next < 1 || next > maxGames) {
-      throw new Error("roundTransition.nextGameNumber out of range");
-    }
-  }
-  if (!roundTransition.acks || typeof roundTransition.acks !== "object") {
-    throw new Error("roundTransition.acks must be an object");
-  }
-  if (typeof roundTransition.acks.p0 !== "boolean") {
-    throw new Error("roundTransition.acks.p0 must be boolean");
-  }
-  if (typeof roundTransition.acks.p1 !== "boolean") {
-    throw new Error("roundTransition.acks.p1 must be boolean");
-  }
-  if (typeof roundTransition.acks.local !== "boolean") {
-    throw new Error("roundTransition.acks.local must be boolean");
-  }
-}
-
-function validateLastExportMetaSnapshot(meta) {
-  if (!meta || typeof meta !== "object") {
-    throw new Error("lastExportMeta must be an object");
-  }
-  asInt(meta.turnNumber, "lastExportMeta.turnNumber");
-  asPlayerIndex(meta.playerIndex, "lastExportMeta.playerIndex");
-}
-
-function validateTurnRecapSnapshot(recap) {
-  if (!recap || typeof recap !== "object") {
-    throw new Error("lastTurnRecap must be an object");
-  }
-  asPlayerIndex(recap.actorIndex, "lastTurnRecap.actorIndex");
-  asInt(recap.moveNumber, "lastTurnRecap.moveNumber");
-  asInt(recap.tableMultiplierStart, "lastTurnRecap.tableMultiplierStart");
-  asInt(recap.tableMultiplierEnd, "lastTurnRecap.tableMultiplierEnd");
-  ensureCardId(recap.playedCardId, "lastTurnRecap.playedCardId");
-  if (recap.drawnCardId !== null && recap.drawnCardId !== undefined) {
-    ensureCardId(recap.drawnCardId, "lastTurnRecap.drawnCardId");
-  }
-  if (recap.handAction && typeof recap.handAction !== "object") {
-    throw new Error("lastTurnRecap.handAction must be an object");
-  }
-  if (recap.drawAction && typeof recap.drawAction !== "object") {
-    throw new Error("lastTurnRecap.drawAction must be an object");
-  }
-  if (recap.decision && typeof recap.decision !== "object") {
-    throw new Error("lastTurnRecap.decision must be an object");
-  }
-}
-
-function validatePendingSelectionSnapshot(pending) {
-  if (!pending || typeof pending !== "object") {
-    throw new Error("pendingSelection must be an object");
-  }
-  if (pending.type === "handMatch" || pending.type === "handPlace") {
-    asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex");
-    ensureCardId(pending.cardId, "pendingSelection.cardId");
-    if (!Array.isArray(pending.options)) {
-      throw new Error("pendingSelection.options must be an array");
-    }
-    pending.options.forEach((id, idx) => ensureCardId(id, `pendingSelection.options[${idx}]`));
-    return;
-  }
-  if (pending.type === "drawMatch" || pending.type === "drawPlace") {
-    asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex");
-    ensureCardId(pending.drawnCardId, "pendingSelection.drawnCardId");
-    asInt(pending.moveNumber, "pendingSelection.moveNumber");
-    if (!Array.isArray(pending.options)) {
-      throw new Error("pendingSelection.options must be an array");
-    }
-    pending.options.forEach((id, idx) => ensureCardId(id, `pendingSelection.options[${idx}]`));
-    return;
-  }
-  throw new Error("pendingSelection has an unknown type");
-}
-
-function validateAwaitingDeckFlipSnapshot(flip) {
-  if (!flip || typeof flip !== "object") {
-    throw new Error("awaitingDeckFlip must be an object");
-  }
-  asPlayerIndex(flip.playerIndex, "awaitingDeckFlip.playerIndex");
-  asInt(flip.moveNumber, "awaitingDeckFlip.moveNumber");
-  ensureCardId(flip.drawnCardId, "awaitingDeckFlip.drawnCardId");
-}
-
-function validateAwaitingDecisionSnapshot(decision) {
-  if (!decision || typeof decision !== "object") {
-    throw new Error("awaitingDecision must be an object");
-  }
-  if (decision.kind !== "stopOrKoi") {
-    throw new Error("awaitingDecision.kind must be stopOrKoi");
-  }
-  asPlayerIndex(decision.playerIndex, "awaitingDecision.playerIndex");
-  asInt(decision.moveNumber, "awaitingDecision.moveNumber");
-  asInt(decision.points, "awaitingDecision.points");
-  asInt(decision.passMultiplier, "awaitingDecision.passMultiplier");
-  asInt(decision.koiMultiplier, "awaitingDecision.koiMultiplier");
-}
-
-function rebuildDrawPileFromPriorIds(previousDrawPileIds, snapshot) {
-  const claimedIds = new Set();
-  state.field.forEach((card) => claimedIds.add(card.id));
-  state.players.forEach((player) => {
-    player.hand.forEach((card) => claimedIds.add(card.id));
-    player.captured.forEach((card) => claimedIds.add(card.id));
-  });
-
-  if (snapshot?.pendingSelection && typeof snapshot.pendingSelection === "object") {
-    const pendingType = String(snapshot.pendingSelection.type || "");
-    if ((pendingType === "drawMatch" || pendingType === "drawPlace") && snapshot.pendingSelection.drawnCardId) {
-      claimedIds.add(String(snapshot.pendingSelection.drawnCardId));
-    }
-  }
-  if (snapshot?.awaitingDeckFlip && typeof snapshot.awaitingDeckFlip === "object" && snapshot.awaitingDeckFlip.drawnCardId) {
-    claimedIds.add(String(snapshot.awaitingDeckFlip.drawnCardId));
-  }
-
-  return previousDrawPileIds
-    .filter((cardId) => !claimedIds.has(cardId))
-    .map((cardId, index) => cardByIdOrThrow(cardId, `drawPile[reconstructed][${index}]`));
+  return getSnapshotCodec().validateSnapshot(snapshot, options);
 }
 
 function applySnapshot(snapshot, options = {}) {
-  const allowMissingDrawPile = Boolean(options.allowMissingDrawPile);
-  const previousDrawPileIds = Array.isArray(state.drawPile) ? state.drawPile.map((card) => card.id) : [];
-  clearRoundRuntimeTimers({
-    resetTurnReplayVisual: false,
-    resetDrawPreviewFxState: true,
-  });
-
-  state.playMode = normalizePlayMode(snapshot.playMode);
-  state.friendFlow = normalizeFriendFlow(snapshot.friendFlow);
-  state.aiProfile = AI_PROFILES[snapshot.aiProfile] ? snapshot.aiProfile : DEFAULT_AI_PROFILE;
-  state.gameNumber = asInt(snapshot.gameNumber, "gameNumber");
-  state.maxGames = asInt(snapshot.maxGames, "maxGames");
-  state.dealer = asPlayerIndex(snapshot.dealer, "dealer");
-  state.currentPlayer = asPlayerIndex(snapshot.currentPlayer, "currentPlayer");
-  const viewerPlayer = asNullablePlayerIndex(snapshot.viewerPlayerIndex, "viewerPlayerIndex");
-  state.viewerPlayerIndex = viewerPlayer === null ? (state.playMode === "friend" ? state.currentPlayer : 0) : viewerPlayer;
-  state.interstitial = normalizeInterstitial(snapshot.interstitial);
-  state.roundTransition = normalizeRoundTransition(snapshot.roundTransition, state.maxGames);
-  state.turnCheckpointReady = Boolean(snapshot.turnCheckpointReady);
-  state.lastExportMeta = normalizeLastExportMeta(snapshot.lastExportMeta);
-  state.lastTurnRecap = normalizeTurnRecap(snapshot.lastTurnRecap);
-  state.activeTurnRecap = null;
-  state.tableMultiplier = asInt(snapshot.tableMultiplier, "tableMultiplier");
-  state.lastKoiCaller = asNullablePlayerIndex(snapshot.lastKoiCaller, "lastKoiCaller");
-  state.firstYakuPlayer = asNullablePlayerIndex(snapshot.firstYakuPlayer, "firstYakuPlayer");
-  state.roundSpecialTwoXPlayer = asNullablePlayerIndex(
-    snapshot.roundSpecialTwoXPlayer,
-    "roundSpecialTwoXPlayer"
-  );
-  state.nextRoundSpecialTwoXPlayer = asNullablePlayerIndex(
-    snapshot.nextRoundSpecialTwoXPlayer,
-    "nextRoundSpecialTwoXPlayer"
-  );
-  state.roundLeaderAtStart = asNullablePlayerIndex(snapshot.roundLeaderAtStart, "roundLeaderAtStart");
-  state.previousRoundWinner = asNullablePlayerIndex(snapshot.previousRoundWinner, "previousRoundWinner");
-  state.previousRoundMultiplier =
-    snapshot.previousRoundMultiplier === null || snapshot.previousRoundMultiplier === undefined
-      ? null
-      : asInt(snapshot.previousRoundMultiplier, "previousRoundMultiplier");
-  state.roundOver = Boolean(snapshot.roundOver);
-  state.matchOver = Boolean(snapshot.matchOver);
-  state.message = String(snapshot.message || "");
-  state.drawPreview = {
-    cardId: snapshot.drawPreview?.cardId || null,
-    text: String(snapshot.drawPreview?.text || "Waiting for draw."),
-  };
-
-  state.players = [createPlayer("You", true), createPlayer("CPU", false)];
-  for (let i = 0; i < 2; i += 1) {
-    const source = snapshot.players[i];
-    const target = state.players[i];
-    if (typeof source.name === "string" && source.name.trim()) {
-      target.name = source.name;
-    }
-    if (typeof source.roleLabel === "string" && source.roleLabel.trim()) {
-      target.roleLabel = source.roleLabel;
-    } else {
-      target.roleLabel = target.name;
-    }
-    if (typeof source.isHuman === "boolean") {
-      target.isHuman = source.isHuman;
-    }
-    target.score = Math.max(0, asInt(source.score, `players[${i}].score`));
-    target.hand = sortByMonth(cardIdsToCards(source.hand, `players[${i}].hand`));
-    target.captured = cardIdsToCards(source.captured, `players[${i}].captured`);
-    target.yakuSeen = new Set(Array.isArray(source.yakuSeen) ? source.yakuSeen.map(String) : []);
-    target.yaku = computeYaku(target.captured, state.gameNumber);
-    if (!target.yakuSeen.size) {
-      target.yakuSeen = new Set(target.yaku.triggerKeys);
-    }
-  }
-
-  if (state.playMode === "friend") {
-    state.players[0].isHuman = true;
-    state.players[1].isHuman = true;
-  }
-
-  state.field = cardIdsToCards(snapshot.field, "field");
-  if (Array.isArray(snapshot.drawPile)) {
-    state.drawPile = cardIdsToCards(snapshot.drawPile, "drawPile");
-  } else if (allowMissingDrawPile) {
-    state.drawPile = rebuildDrawPileFromPriorIds(previousDrawPileIds, snapshot);
-  } else {
-    state.drawPile = cardIdsToCards(snapshot.drawPile, "drawPile");
-  }
-  state.moveCounts = [
-    Math.max(0, asInt(snapshot.moveCounts[0], "moveCounts[0]")),
-    Math.max(0, asInt(snapshot.moveCounts[1], "moveCounts[1]")),
-  ];
-  state.actionLog = Array.isArray(snapshot.actionLog)
-    ? snapshot.actionLog.map((line) => String(line)).slice(-ACTION_LOG_LIMIT)
-    : [];
-  state.roundHistory = snapshot.roundHistory.map((entry, idx) => normalizeRoundHistoryEntry(entry, idx, state.maxGames));
-
-  state.pendingSelection = hydratePendingSelection(snapshot.pendingSelection);
-  state.awaitingDeckFlip = hydrateAwaitingDeckFlip(snapshot.awaitingDeckFlip);
-  state.awaitingDecision = hydrateAwaitingDecision(snapshot.awaitingDecision);
-  state.aiPreview = hydrateAiPreview(snapshot.aiPreview);
-  state.cpuPhase1PreviewCardId = snapshot.cpuPhase1PreviewCardId || null;
-
-  let replayAfterImport = false;
-  if (state.playMode === "friend" && state.interstitial.open) {
-    const nextPlayerIndex =
-      state.interstitial.nextPlayerIndex === null || state.interstitial.nextPlayerIndex === undefined
-        ? state.currentPlayer
-        : state.interstitial.nextPlayerIndex;
-    state.viewerPlayerIndex = nextPlayerIndex;
-    setFriendInterstitialOpen(false);
-    replayAfterImport = true;
-  }
-
-  validateHydratedStateCardOwnership();
-  state.autoFocusTargetKey = null;
-  renderAll();
-  if (replayAfterImport) {
-    playTurnRecapForViewer();
-  }
-  resumeLoadedStateFlow();
+  return getSnapshotCodec().applySnapshot(snapshot, options);
 }
 
 function hydratePendingSelection(pending) {
-  if (!pending) return null;
-  if (pending.type === "handMatch" || pending.type === "handPlace") {
-    return {
-      type: pending.type,
-      playerIndex: asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex"),
-      cardId: String(pending.cardId),
-      options: pending.options.map(String),
-    };
-  }
-  if (pending.type === "drawMatch" || pending.type === "drawPlace") {
-    return {
-      type: pending.type,
-      playerIndex: asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex"),
-      drawnCard: cardByIdOrThrow(pending.drawnCardId, "pendingSelection.drawnCardId"),
-      moveNumber: asInt(pending.moveNumber, "pendingSelection.moveNumber"),
-      options: pending.options.map(String),
-    };
-  }
-  return null;
+  return getSnapshotCodec().hydratePendingSelection(pending);
 }
 
 function hydrateAwaitingDeckFlip(flip) {
-  if (!flip) return null;
-  return {
-    playerIndex: asPlayerIndex(flip.playerIndex, "awaitingDeckFlip.playerIndex"),
-    moveNumber: asInt(flip.moveNumber, "awaitingDeckFlip.moveNumber"),
-    drawnCard: cardByIdOrThrow(flip.drawnCardId, "awaitingDeckFlip.drawnCardId"),
-    revealed: Boolean(flip.revealed),
-  };
+  return getSnapshotCodec().hydrateAwaitingDeckFlip(flip);
 }
 
 function hydrateAwaitingDecision(decision) {
-  if (!decision) return null;
-  return {
-    ...decision,
-    kind: "stopOrKoi",
-    playerIndex: asPlayerIndex(decision.playerIndex, "awaitingDecision.playerIndex"),
-    moveNumber: asInt(decision.moveNumber, "awaitingDecision.moveNumber"),
-    points: asInt(decision.points, "awaitingDecision.points"),
-    passMultiplier: asInt(decision.passMultiplier, "awaitingDecision.passMultiplier"),
-    koiMultiplier: asInt(decision.koiMultiplier, "awaitingDecision.koiMultiplier"),
-    canPass: Boolean(decision.canPass),
-    forcedByFinalRound: Boolean(decision.forcedByFinalRound),
-    resumeDrawPhase: Boolean(decision.resumeDrawPhase),
-    yakuText: String(decision.yakuText || ""),
-    specialTwoXActive: Boolean(decision.specialTwoXActive),
-    prompt: String(decision.prompt || ""),
-  };
+  return getSnapshotCodec().hydrateAwaitingDecision(decision);
 }
 
 function hydrateAiPreview(aiPreview) {
-  if (!aiPreview) return null;
-  return {
-    options: Array.isArray(aiPreview.options) ? aiPreview.options.map(String) : [],
-    prompt: String(aiPreview.prompt || ""),
-  };
+  return getSnapshotCodec().hydrateAiPreview(aiPreview);
 }
 
 function normalizePlayMode(value) {
-  return value === "friend" ? "friend" : "cpu";
+  return getSnapshotCodec().normalizePlayMode(value);
 }
 
 function normalizeFriendFlow(value) {
-  if (value === "hotseat" || value === "code" || value === "hybrid") {
-    return value;
-  }
-  return "hybrid";
+  return getSnapshotCodec().normalizeFriendFlow(value);
 }
 
 function normalizeInterstitial(interstitial) {
-  const open = Boolean(interstitial?.open);
-  const nextPlayerIndex = asNullablePlayerIndex(interstitial?.nextPlayerIndex, "interstitial.nextPlayerIndex");
-  return {
-    open,
-    nextPlayerIndex,
-  };
+  return getSnapshotCodec().normalizeInterstitial(interstitial);
 }
 
 function createClosedRoundTransition() {
-  return {
-    open: false,
-    winnerIndex: null,
-    pointsAwarded: 0,
-    noScore: false,
-    nextGameNumber: null,
-    acks: {
-      p0: false,
-      p1: false,
-      local: false,
-    },
-  };
+  return getSnapshotCodec().createClosedRoundTransition();
 }
 
 function normalizeRoundTransition(roundTransition, maxGames) {
-  if (!roundTransition || typeof roundTransition !== "object") {
-    return createClosedRoundTransition();
-  }
-  const open = Boolean(roundTransition.open);
-  const winnerIndex = asNullablePlayerIndex(roundTransition.winnerIndex, "roundTransition.winnerIndex");
-  const pointsAwardedRaw = roundTransition.pointsAwarded;
-  const pointsAwarded =
-    pointsAwardedRaw === null || pointsAwardedRaw === undefined ? 0 : Math.max(0, asInt(pointsAwardedRaw, "roundTransition.pointsAwarded"));
-  const noScore = Boolean(roundTransition.noScore);
-  const nextGameRaw = roundTransition.nextGameNumber;
-  const nextGameNumber =
-    nextGameRaw === null || nextGameRaw === undefined ? null : asInt(nextGameRaw, "roundTransition.nextGameNumber");
-  if (nextGameNumber !== null && (nextGameNumber < 1 || nextGameNumber > maxGames)) {
-    throw new Error("roundTransition.nextGameNumber out of range");
-  }
-  const acks = {
-    p0: Boolean(roundTransition.acks?.p0),
-    p1: Boolean(roundTransition.acks?.p1),
-    local: Boolean(roundTransition.acks?.local),
-  };
-  return {
-    open,
-    winnerIndex,
-    pointsAwarded,
-    noScore,
-    nextGameNumber,
-    acks,
-  };
+  return getSnapshotCodec().normalizeRoundTransition(roundTransition, maxGames);
 }
 
 function normalizeLastExportMeta(meta) {
-  if (!meta || typeof meta !== "object") return null;
-  return {
-    turnNumber: asInt(meta.turnNumber, "lastExportMeta.turnNumber"),
-    playerIndex: asPlayerIndex(meta.playerIndex, "lastExportMeta.playerIndex"),
-  };
+  return getSnapshotCodec().normalizeLastExportMeta(meta);
 }
 
 function normalizeTurnRecap(recap) {
-  if (!recap || typeof recap !== "object") return null;
-  return {
-    actorIndex: asPlayerIndex(recap.actorIndex, "lastTurnRecap.actorIndex"),
-    moveNumber: asInt(recap.moveNumber, "lastTurnRecap.moveNumber"),
-    tableMultiplierStart: asInt(recap.tableMultiplierStart, "lastTurnRecap.tableMultiplierStart"),
-    tableMultiplierEnd: asInt(recap.tableMultiplierEnd, "lastTurnRecap.tableMultiplierEnd"),
-    playedCardId: String(recap.playedCardId),
-    handAction: recap.handAction && typeof recap.handAction === "object" ? { ...recap.handAction } : null,
-    drawnCardId: recap.drawnCardId ? String(recap.drawnCardId) : null,
-    drawAction: recap.drawAction && typeof recap.drawAction === "object" ? { ...recap.drawAction } : null,
-    decision: recap.decision && typeof recap.decision === "object" ? { ...recap.decision } : null,
-  };
+  return getSnapshotCodec().normalizeTurnRecap(recap);
 }
 
 function validateRoundHistoryEntry(entry, idx, maxGames) {
-  if (!entry || typeof entry !== "object") {
-    throw new Error(`roundHistory[${idx}] must be an object`);
-  }
-  const month = asInt(entry.month, `roundHistory[${idx}].month`);
-  if (month < 1 || month > maxGames) {
-    throw new Error(`roundHistory[${idx}].month out of range`);
-  }
-  const p0 =
-    entry.p0 === null || entry.p0 === undefined
-      ? asInt(entry.you, `roundHistory[${idx}].you`)
-      : asInt(entry.p0, `roundHistory[${idx}].p0`);
-  const p1 =
-    entry.p1 === null || entry.p1 === undefined
-      ? asInt(entry.cpu, `roundHistory[${idx}].cpu`)
-      : asInt(entry.p1, `roundHistory[${idx}].p1`);
-  if (p0 < 0 || p1 < 0) {
-    throw new Error(`roundHistory[${idx}] scores must be non-negative`);
-  }
-  const multiplier = asInt(entry.multiplier, `roundHistory[${idx}].multiplier`);
-  if (multiplier < 1 || multiplier > 4) {
-    throw new Error(`roundHistory[${idx}].multiplier out of range`);
-  }
+  return getSnapshotCodec().validateRoundHistoryEntry(entry, idx, maxGames);
 }
 
 function normalizeRoundHistoryEntry(entry, idx, maxGames) {
-  validateRoundHistoryEntry(entry, idx, maxGames);
-  const p0 =
-    entry.p0 === null || entry.p0 === undefined ? asInt(entry.you, `roundHistory[${idx}].you`) : asInt(entry.p0, `roundHistory[${idx}].p0`);
-  const p1 =
-    entry.p1 === null || entry.p1 === undefined ? asInt(entry.cpu, `roundHistory[${idx}].cpu`) : asInt(entry.p1, `roundHistory[${idx}].p1`);
-  return {
-    month: entry.month,
-    p0,
-    p1,
-    multiplier: entry.multiplier,
-    noScore: Boolean(entry.noScore),
-  };
+  return getSnapshotCodec().normalizeRoundHistoryEntry(entry, idx, maxGames);
 }
 
 function validateHydratedStateCardOwnership() {
-  const ownership = new Map();
-  const claim = (id, bucket) => {
-    if (ownership.has(id)) {
-      throw new Error(`Card ${id} appears in both ${ownership.get(id)} and ${bucket}`);
-    }
-    ownership.set(id, bucket);
-  };
-
-  state.field.forEach((card) => claim(card.id, "field"));
-  state.drawPile.forEach((card) => claim(card.id, "drawPile"));
-  state.players.forEach((player, playerIndex) => {
-    player.hand.forEach((card) => claim(card.id, `players[${playerIndex}].hand`));
-    player.captured.forEach((card) => claim(card.id, `players[${playerIndex}].captured`));
-  });
-  if (state.pendingSelection?.type === "drawMatch" || state.pendingSelection?.type === "drawPlace") {
-    claim(state.pendingSelection.drawnCard.id, "pendingSelection.drawnCard");
-  }
-  if (state.awaitingDeckFlip) {
-    claim(state.awaitingDeckFlip.drawnCard.id, "awaitingDeckFlip.drawnCard");
-  }
-
-  if (ownership.size > CARD_DECK.length) {
-    throw new Error("Snapshot references too many cards");
-  }
-
-  if (state.pendingSelection) {
-    const optionSet = new Set(state.field.map((card) => card.id));
-    if (state.pendingSelection.type === "drawPlace") {
-      if (
-        state.pendingSelection.options.length !== 1 ||
-        state.pendingSelection.options[0] !== state.pendingSelection.drawnCard.id
-      ) {
-        throw new Error("drawPlace pendingSelection options must reference the drawn card preview");
-      }
-    } else {
-      for (const optionId of state.pendingSelection.options) {
-        if (!optionSet.has(optionId)) {
-          throw new Error("pendingSelection references a field card that is not on the field");
-        }
-      }
-    }
-    if (state.pendingSelection.type === "handMatch" || state.pendingSelection.type === "handPlace") {
-      const handSet = new Set(state.players[state.pendingSelection.playerIndex].hand.map((card) => card.id));
-      if (!handSet.has(state.pendingSelection.cardId)) {
-        throw new Error("pendingSelection hand card is missing");
-      }
-    }
-  }
+  return getSnapshotCodec().validateHydratedStateCardOwnership();
 }
 
 function resumeLoadedStateFlow() {
@@ -2448,45 +2465,31 @@ function resumeCpuDeckFlipFlow(flip, cpuPlayerIndex = getCpuPlayerIndex()) {
 }
 
 function asInt(value, label) {
-  if (!Number.isInteger(value)) {
-    throw new Error(`${label} must be an integer`);
-  }
-  return value;
+  return getSnapshotCodec().asInt(value, label);
 }
 
 function asPlayerIndex(value, label) {
-  const parsed = asInt(value, label);
-  if (parsed !== 0 && parsed !== 1) {
-    throw new Error(`${label} must be 0 or 1`);
-  }
-  return parsed;
+  return getSnapshotCodec().asPlayerIndex(value, label);
 }
 
 function ensureNullablePlayerIndex(value, label) {
-  asNullablePlayerIndex(value, label);
+  return getSnapshotCodec().ensureNullablePlayerIndex(value, label);
 }
 
 function asNullablePlayerIndex(value, label) {
-  if (value === null || value === undefined) return null;
-  return asPlayerIndex(value, label);
+  return getSnapshotCodec().asNullablePlayerIndex(value, label);
 }
 
 function ensureCardId(id, label) {
-  if (typeof id !== "string" || !CARD_BY_ID.has(id)) {
-    throw new Error(`${label} contains unknown card id`);
-  }
+  return getSnapshotCodec().ensureCardId(id, label);
 }
 
 function cardByIdOrThrow(id, label) {
-  ensureCardId(id, label);
-  return CARD_BY_ID.get(id);
+  return getSnapshotCodec().cardByIdOrThrow(id, label);
 }
 
 function cardIdsToCards(ids, label) {
-  if (!Array.isArray(ids)) {
-    throw new Error(`${label} must be an array`);
-  }
-  return ids.map((id, index) => cardByIdOrThrow(id, `${label}[${index}]`));
+  return getSnapshotCodec().cardIdsToCards(ids, label);
 }
 
 function encodeBase64UrlUtf8(text) {
@@ -2504,15 +2507,6 @@ function decodeBase64UrlUtf8(value) {
   const binary = atob(normalized + padding);
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return new TextDecoder().decode(bytes);
-}
-
-function computeCodeChecksum(payload) {
-  let hash = 2166136261;
-  for (let i = 0; i < payload.length; i += 1) {
-    hash ^= payload.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36).toUpperCase();
 }
 
 function nextMoveNumber(playerIndex) {
@@ -2780,6 +2774,8 @@ function startNewMatch(options = {}) {
   const friendFlowSource = options.friendFlow || state.friendFlow || "hybrid";
   const playMode = playModeSource === "friend" ? "friend" : "cpu";
   const friendFlow = normalizeFriendFlow(friendFlowSource);
+  const resumeMatchId = typeof options.resumeMatchId === "string" ? options.resumeMatchId.trim() : "";
+  const resumeLocalMatchId = typeof options.resumeLocalMatchId === "string" ? options.resumeLocalMatchId.trim() : "";
   const forcedDealer =
     options.forceDealerPlayerIndex === 0 || options.forceDealerPlayerIndex === 1 ? options.forceDealerPlayerIndex : null;
   const forcedCurrentPlayer =
@@ -2792,6 +2788,12 @@ function startNewMatch(options = {}) {
   });
   state.playMode = playMode;
   state.friendFlow = friendFlow;
+  const startingOnlineFriendSession = playMode === "friend" && Boolean(state.rtcRole && state.rtcRoomCode);
+  cpuAutosaveMatchId = playMode === "cpu" ? (resumeMatchId || generateCpuSaveMatchId()) : null;
+  localAutosaveMatchId =
+    playMode === "friend" && !startingOnlineFriendSession
+      ? (resumeLocalMatchId || generateLocalSaveMatchId())
+      : null;
   if (playMode === "friend") {
     state.aiProfile = DEFAULT_AI_PROFILE;
     state.players = [
@@ -2937,6 +2939,8 @@ function startRound() {
   addSystemLog(state.message);
 
   renderAll();
+  requestCpuAutosave("round-start");
+  requestLocalAutosave("round-start");
 
   if (!state.players[state.currentPlayer].isHuman) {
     queueAITurn(420);
@@ -3736,188 +3740,31 @@ function buildDecisionPrompt(decision) {
 }
 
 function getAIProfile() {
-  return AI_PROFILES[state.aiProfile] || AI_PROFILES[DEFAULT_AI_PROFILE];
-}
-
-function estimateCardsRemaining(game = state) {
-  return game.drawPile.length + game.players[0].hand.length + game.players[1].hand.length;
+  return getAIController().getAIProfile();
 }
 
 function buildCapturedStats(captured, roundMonth) {
-  const ids = new Set(captured.map((card) => card.id));
-  const lights = captured.filter((card) => card.type === "light").length;
-  const seeds = captured.filter((card) => card.type === "seed").length;
-  const scrolls = captured.filter((card) => card.type === "scroll").length;
-  const basics = captured.filter((card) => card.type === "basic").length;
-  const roundMonthCount = captured.filter((card) => card.month === roundMonth).length;
-  return { ids, lights, seeds, scrolls, basics, roundMonthCount };
-}
-
-function estimateNearSetThreat(stats, setIds, fullValue) {
-  let present = 0;
-  for (const id of setIds) {
-    if (stats.ids.has(id)) present += 1;
-  }
-  const missing = setIds.length - present;
-  if (missing <= 0) return fullValue * 0.25;
-  if (missing === 1) return fullValue * 0.72;
-  if (missing === 2) return fullValue * 0.34;
-  return 0;
+  return getAIController().buildCapturedStats(captured, roundMonth);
 }
 
 function estimateYakuThreatScore(captured, roundMonth) {
-  const stats = buildCapturedStats(captured, roundMonth);
-  const actual = computeYaku(captured, roundMonth).points;
-  let threat = actual * 1.05;
-
-  if (stats.lights >= 4) threat += 7.2;
-  else if (stats.lights === 3) threat += 4.1;
-  else if (stats.lights === 2) threat += 1.7;
-
-  if (stats.seeds === 4) threat += 2.4;
-  if (stats.seeds >= 5) threat += 2.2 + (stats.seeds - 5) * 0.7;
-  if (stats.scrolls === 4) threat += 1.5;
-  if (stats.scrolls >= 5) threat += 1.6 + (stats.scrolls - 5) * 0.55;
-  if (stats.basics === 9) threat += 1.2;
-  if (stats.basics >= 10) threat += 1.4 + (stats.basics - 10) * 0.45;
-  if (stats.roundMonthCount === 3) threat += 3.4;
-
-  threat += estimateNearSetThreat(stats, ["3a", "9a"], 5);
-  threat += estimateNearSetThreat(stats, ["8a", "9a"], 5);
-  threat += estimateNearSetThreat(stats, ["6a", "7a", "10a"], 5);
-  threat += estimateNearSetThreat(stats, ["1b", "2b", "3b"], 5);
-  threat += estimateNearSetThreat(stats, ["6b", "9b", "10b"], 5);
-
-  return threat;
+  return getAIController().estimateYakuThreatScore(captured, roundMonth);
 }
 
 function estimateCardThreatForPlayer(card, captured, roundMonth) {
-  const stats = buildCapturedStats(captured, roundMonth);
-  let threat = typeValue(card.type) * 0.55;
-
-  if (card.type === "light") threat += 2.1 + stats.lights * 0.35;
-  if (card.type === "seed") {
-    if (stats.seeds >= 4) threat += 2.2;
-    else threat += stats.seeds * 0.3;
-  }
-  if (card.type === "scroll") {
-    if (stats.scrolls >= 4) threat += 1.5;
-    else threat += stats.scrolls * 0.18;
-  }
-  if (card.type === "basic" && stats.basics >= 9) {
-    threat += 1.15;
-  }
-
-  if (card.month === roundMonth) {
-    if (stats.roundMonthCount === 3) threat += 3.1;
-    else if (stats.roundMonthCount === 2) threat += 1.4;
-  }
-
-  const ifHas = (id) => stats.ids.has(id);
-  if ((card.id === "3a" && ifHas("9a")) || (card.id === "9a" && ifHas("3a"))) threat += 2.25;
-  if ((card.id === "8a" && ifHas("9a")) || (card.id === "9a" && ifHas("8a"))) threat += 2.0;
-
-  if (["6a", "7a", "10a"].includes(card.id)) {
-    let present = 0;
-    if (ifHas("6a")) present += 1;
-    if (ifHas("7a")) present += 1;
-    if (ifHas("10a")) present += 1;
-    if (present >= 2) threat += 2.1;
-    else if (present === 1) threat += 0.9;
-  }
-
-  if (["1b", "2b", "3b"].includes(card.id)) {
-    let red = 0;
-    if (ifHas("1b")) red += 1;
-    if (ifHas("2b")) red += 1;
-    if (ifHas("3b")) red += 1;
-    if (red >= 2) threat += 1.9;
-    else if (red === 1) threat += 0.55;
-  }
-
-  if (["6b", "9b", "10b"].includes(card.id)) {
-    let blue = 0;
-    if (ifHas("6b")) blue += 1;
-    if (ifHas("9b")) blue += 1;
-    if (ifHas("10b")) blue += 1;
-    if (blue >= 2) threat += 1.9;
-    else if (blue === 1) threat += 0.55;
-  }
-
-  return threat;
+  return getAIController().estimateCardThreatForPlayer(card, captured, roundMonth);
 }
 
 function estimatePlayerThreatIndex(playerIndex, game = state) {
-  const player = game.players[playerIndex];
-  const capturedThreat = estimateYakuThreatScore(player.captured, game.gameNumber);
-  const fieldThreat = game.field.reduce(
-    (sum, card) => sum + estimateCardThreatForPlayer(card, player.captured, game.gameNumber),
-    0
-  );
-  return capturedThreat + fieldThreat * 0.22 + player.hand.length * 0.08;
+  return getAIController().estimatePlayerThreatIndex(playerIndex, game);
 }
 
 function estimateHandOpportunity(playerIndex, game = state) {
-  const player = game.players[playerIndex];
-  let opportunity = 0;
-  for (const card of player.hand) {
-    const matches = getFieldMatches(card.month, game);
-    if (!matches.length) continue;
-    opportunity += typeValue(card.type) * 0.35 + 0.4;
-    if (matches.some((entry) => entry.type === "light")) {
-      opportunity += 0.75;
-    }
-  }
-  return opportunity;
+  return getAIController().estimateHandOpportunity(playerIndex, game);
 }
 
 function chooseAIDecision(decision, game = state) {
-  if (!decision.canPass) return "koi";
-  const profile = getAIProfile();
-  const weights = profile.decision;
-  const playerIndex = decision.playerIndex;
-  const opponentIndex = playerIndex === 0 ? 1 : 0;
-  const player = game.players[playerIndex];
-  const opponent = game.players[opponentIndex];
-  const lead = player.score - opponent.score;
-  const passScore = decision.points * decision.passMultiplier;
-
-  if (passScore >= weights.autoPassAtPoints) {
-    return "pass";
-  }
-
-  const cardsRemaining = estimateCardsRemaining(game);
-  const progress = 1 - Math.min(cardsRemaining, 24) / 24;
-  const ownThreat = estimatePlayerThreatIndex(playerIndex, game) + estimateHandOpportunity(playerIndex, game);
-  const oppThreat = estimatePlayerThreatIndex(opponentIndex, game) + estimateHandOpportunity(opponentIndex, game);
-
-  const passUtility =
-    passScore +
-    weights.passBase +
-    Math.max(0, lead) * weights.leadLockWeight +
-    (decision.passMultiplier >= 3 ? weights.highMultPassBonus : 0) +
-    progress * weights.latePassWeight -
-    Math.max(0, -lead) * weights.behindPassPenalty;
-
-  let koiRisk = oppThreat * (weights.riskWeight + 0.08 * (decision.koiMultiplier - 1));
-  if (decision.koiMultiplier >= 4 && oppThreat > ownThreat * weights.maxMultRiskGuard) {
-    koiRisk += 2.3;
-  }
-
-  const koiUtility =
-    weights.koiBase +
-    decision.koiMultiplier * weights.multiplierHunger +
-    ownThreat * weights.futureGainWeight +
-    (decision.resumeDrawPhase ? weights.handPhaseKoiBonus : 0) +
-    Math.max(0, -lead) * weights.comebackWeight -
-    Math.max(0, lead) * weights.leadRiskAversion * (decision.koiMultiplier - 1) -
-    koiRisk;
-
-  const diff = koiUtility - passUtility;
-  if (Math.abs(diff) <= weights.coinFlipBand) {
-    return Math.random() < weights.randomKoiChance ? "koi" : "pass";
-  }
-  return diff > weights.koiMargin ? "koi" : "pass";
+  return getAIController().chooseAIDecision(decision, game);
 }
 
 function applyKoiAndContinue(decision) {
@@ -3959,6 +3806,8 @@ function moveToNextPlayer() {
   } else {
     state.viewerPlayerIndex = 0;
   }
+  requestCpuAutosave("turn-complete");
+  requestLocalAutosave("turn-complete");
   renderAll();
   if (!state.players[state.currentPlayer].isHuman) {
     queueAITurn(420);
@@ -4106,6 +3955,16 @@ function endRoundDraw() {
   }
 
   renderAll();
+  if (state.playMode === "cpu" && state.matchOver) {
+    void clearFinishedCpuAutosave("match-over-draw");
+  } else if (state.playMode === "cpu") {
+    requestCpuAutosave("round-transition-draw");
+  }
+  if (isLocalPassAndPlayMode() && state.matchOver) {
+    void clearFinishedLocalAutosave("match-over-draw");
+  } else if (isLocalPassAndPlayMode()) {
+    requestLocalAutosave("round-transition-draw");
+  }
 }
 
 function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
@@ -4173,6 +4032,16 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
   }
 
   renderAll();
+  if (state.playMode === "cpu" && state.matchOver) {
+    void clearFinishedCpuAutosave("match-over-win");
+  } else if (state.playMode === "cpu") {
+    requestCpuAutosave("round-transition-win");
+  }
+  if (isLocalPassAndPlayMode() && state.matchOver) {
+    void clearFinishedLocalAutosave("match-over-win");
+  } else if (isLocalPassAndPlayMode()) {
+    requestLocalAutosave("round-transition-win");
+  }
 }
 
 function applyFinalMessage() {
@@ -4201,77 +4070,15 @@ function onNextGame() {
 }
 
 function queueAITurn(delayMs) {
-  const cpuPlayerIndex = getCpuPlayerIndex();
-  if (cpuPlayerIndex < 0) return;
-  clearAITask();
-  scheduleAIStep(delayMs, () => {
-    if (state.roundOver || state.currentPlayer !== cpuPlayerIndex || state.awaitingDecision) return;
-    performAITurn(cpuPlayerIndex);
-  });
+  return getAIController().queueAITurn(delayMs);
 }
 
 function performAITurn(playerIndex = getCpuPlayerIndex()) {
-  if (playerIndex < 0) return;
-  const choice = chooseAICard(playerIndex);
-  if (!choice || !choice.card) return;
-  state.message = `${state.players[playerIndex].name} is choosing a card.`;
-  addSystemLog(state.message);
-  renderAll();
-
-  scheduleAIStep(AI_STEP_THINK_MS, () => {
-    if (state.roundOver || state.currentPlayer !== playerIndex || state.awaitingDecision) return;
-
-    state.cpuPhase1PreviewCardId = choice.card.id;
-    addSystemLog(`${state.players[playerIndex].name} selected ${choice.card.name}.`);
-    renderAll();
-
-    scheduleAIStep(AI_STEP_CPU_PHASE1_PREVIEW_MS, () => {
-      if (state.roundOver || state.currentPlayer !== playerIndex || state.awaitingDecision) return;
-
-      const matches = getFieldMatches(choice.card.month);
-      if (matches.length > 0) {
-        const targetOptions =
-          matches.length === 3
-            ? matches.map((entry) => entry.id)
-            : matches.length === 2 && choice.targetFieldId
-              ? [choice.targetFieldId]
-              : [matches[0].id];
-        const aiPrompt =
-          matches.length === 3
-            ? `CPU lines up a ${describeMonth(choice.card.month)} sweep.`
-            : matches.length === 2 && choice.targetFieldId
-              ? `CPU targets ${CARD_BY_ID.get(choice.targetFieldId)?.name || "a field card"}.`
-              : `CPU targets ${matches[0].name}.`;
-        state.aiPreview = {
-          options: targetOptions,
-          prompt: aiPrompt,
-        };
-        addSystemLog(aiPrompt);
-        renderAll();
-        scheduleAIStep(AI_STEP_TARGET_MS, () => {
-          if (state.roundOver || state.currentPlayer !== playerIndex || state.awaitingDecision) return;
-          state.aiPreview = null;
-          executePlayFromHand(playerIndex, choice.card.id, choice.targetFieldId || null);
-        });
-        return;
-      }
-
-      executePlayFromHand(playerIndex, choice.card.id, null);
-    });
-  });
+  return getAIController().performAITurn(playerIndex);
 }
 
 function scheduleAIStep(delayMs, task) {
-  if (state.aiTimer) {
-    clearTimeout(state.aiTimer);
-  }
-  state.aiTask = task;
-  state.aiTimer = setTimeout(() => {
-    const next = state.aiTask;
-    state.aiTask = null;
-    state.aiTimer = null;
-    if (next) next();
-  }, delayMs);
+  return getAIController().scheduleAIStep(delayMs, task);
 }
 
 function clearRoundRuntimeTimers(options = {}) {
@@ -4285,13 +4092,7 @@ function clearRoundRuntimeTimers(options = {}) {
 }
 
 function clearAITask() {
-  if (state.aiTimer) {
-    clearTimeout(state.aiTimer);
-  }
-  state.aiTimer = null;
-  state.aiTask = null;
-  state.aiPreview = null;
-  state.cpuPhase1PreviewCardId = null;
+  return getAIController().clearAITask();
 }
 
 function clearDrawRevealTask() {
@@ -4302,105 +4103,19 @@ function clearDrawRevealTask() {
 }
 
 function chooseAICard(playerIndex, game = state) {
-  const profile = getAIProfile();
-  const player = game.players[playerIndex];
-  if (!player.hand.length) return null;
-
-  let best = null;
-  for (const card of player.hand) {
-    const matches = getFieldMatches(card.month, game);
-    if (!matches.length) {
-      const score = evaluateAIMoveOption(playerIndex, card, null, profile, null, game);
-      if (!best || score > best.score) {
-        best = { card, targetFieldId: null, score };
-      }
-      continue;
-    }
-
-    if (matches.length === 3) {
-      const score = evaluateAIMoveOption(playerIndex, card, null, profile, matches, game);
-      if (!best || score > best.score) {
-        best = { card, targetFieldId: null, score };
-      }
-      continue;
-    }
-
-    for (const fieldCard of matches) {
-      const score = evaluateAIMoveOption(playerIndex, card, fieldCard, profile, null, game);
-      if (!best || score > best.score) {
-        best = { card, targetFieldId: fieldCard.id, score };
-      }
-    }
-  }
-  return best;
+  return getAIController().chooseAICard(playerIndex, game);
 }
 
 function evaluateAIMoveOption(playerIndex, card, fieldCard, profile, fieldCardsOverride = null, game = state) {
-  const player = game.players[playerIndex];
-  const opponentIndex = playerIndex === 0 ? 1 : 0;
-  const opponent = game.players[opponentIndex];
-  const weights = profile.card;
-  const roundMonth = game.gameNumber;
-  const fieldCards = fieldCardsOverride || (fieldCard ? [fieldCard] : null);
-
-  const beforeYakuPoints = computeYaku(player.captured, roundMonth).points;
-  const beforePotential = estimateYakuThreatScore(player.captured, roundMonth);
-
-  const capturedAfter = fieldCards ? [...player.captured, card, ...fieldCards] : [...player.captured];
-  const afterYakuPoints = computeYaku(capturedAfter, roundMonth).points;
-  const afterPotential = estimateYakuThreatScore(capturedAfter, roundMonth);
-
-  const capturedFieldValue = fieldCards
-    ? fieldCards.reduce((sum, entry) => sum + typeValue(entry.type), 0)
-    : 0;
-  const immediate = fieldCards
-    ? typeValue(card.type) +
-      capturedFieldValue * 1.1 +
-      (fieldCards.length >= 3 ? 2.2 : 0)
-    : -weights.expose * (0.45 + typeValue(card.type) * 0.32);
-  const yakuGain = Math.max(0, afterYakuPoints - beforeYakuPoints);
-  const comboGain = afterPotential - beforePotential;
-
-  const denial = fieldCards
-    ? fieldCards.reduce(
-        (sum, entry) => sum + estimateCardThreatForPlayer(entry, opponent.captured, roundMonth),
-        0
-      )
-    : -estimateCardThreatForPlayer(card, opponent.captured, roundMonth) * 0.7;
-  const monthBonus = card.month === roundMonth ? 1 : 0;
-  const lightBonus = card.type === "light" ? weights.lightBonus : 0;
-  const pressure = estimatePlayerThreatIndex(opponentIndex, game) - estimatePlayerThreatIndex(playerIndex, game);
-
-  const jitter = (Math.random() - 0.5) * weights.jitter;
-  return (
-    immediate * weights.immediate +
-    yakuGain * weights.yakuGain +
-    comboGain * weights.comboGain +
-    denial * weights.denial +
-    monthBonus * weights.month +
-    lightBonus +
-    Math.max(0, pressure) * 0.08 +
-    jitter
-  );
+  return getAIController().evaluateAIMoveOption(playerIndex, card, fieldCard, profile, fieldCardsOverride, game);
 }
 
 function chooseBestMatchForAI(playerIndex, sourceCard, matches, game = state) {
-  const profile = getAIProfile();
-  let best = null;
-  for (const fieldCard of matches) {
-    const score = evaluateAIMoveOption(playerIndex, sourceCard, fieldCard, profile, null, game);
-    if (!best || score > best.score) {
-      best = { fieldCard, score };
-    }
-  }
-  return best ? best.fieldCard : matches[0];
+  return getAIController().chooseBestMatchForAI(playerIndex, sourceCard, matches, game);
 }
 
 function typeValue(type) {
-  if (type === "light") return 5;
-  if (type === "seed") return 4;
-  if (type === "scroll") return 3;
-  return 1;
+  return getAIController().typeValue(type);
 }
 
 function capturedDisplayGroupRank(card) {
@@ -4576,6 +4291,12 @@ function renderFriendInterstitial() {
   const nextName = state.players[nextPlayerIndex]?.name || `Player ${nextPlayerIndex + 1}`;
   const previousPlayerIndex = nextPlayerIndex === 0 ? 1 : 0;
   const previousName = state.players[previousPlayerIndex]?.name || `Player ${previousPlayerIndex + 1}`;
+  const previousHandCount = Array.isArray(state.players[previousPlayerIndex]?.hand)
+    ? state.players[previousPlayerIndex].hand.length
+    : null;
+  const previousHandSummary =
+    previousHandCount === null ? "" : ` (${previousName} ${Math.max(0, previousHandCount)}/8 cards left).`;
+  const onlineSessionActive = isOnlineFriendSessionActive();
 
   if (ui.friendInterstitialTitle) {
     ui.friendInterstitialTitle.textContent = `Pass to ${nextName}`;
@@ -4584,10 +4305,10 @@ function renderFriendInterstitial() {
     const moveText = state.lastExportMeta
       ? ` (${previousName} move ${state.lastExportMeta.turnNumber})`
       : "";
-    if (isOnlineFriendSessionActive()) {
+    if (onlineSessionActive) {
       ui.friendInterstitialText.textContent = `${previousName}'s turn is complete${moveText}. Online sync is automatic.`;
     } else {
-      ui.friendInterstitialText.textContent = `${previousName}'s turn is complete${moveText}. Pass the phone, or copy a turn link and continue asynchronously.`;
+      ui.friendInterstitialText.textContent = `${previousName}'s turn is complete${previousHandSummary} Pass to ${nextName}.`;
     }
   }
   if (ui.friendContinueBtn) {
@@ -4596,25 +4317,25 @@ function renderFriendInterstitial() {
     ui.friendContinueBtn.textContent = `${nextName} Ready`;
   }
   if (ui.friendImportCode) {
-    ui.friendImportCode.placeholder = isOnlineFriendSessionActive()
+    ui.friendImportCode.placeholder = onlineSessionActive
       ? "Online room sync is automatic."
-      : "Paste turn link or code from other player";
+      : "";
   }
   if (ui.friendCopyCodeBtn) {
-    ui.friendCopyCodeBtn.hidden = false;
-    ui.friendCopyCodeBtn.disabled = !isFriendTurnExportWindow();
+    ui.friendCopyCodeBtn.hidden = !onlineSessionActive;
+    ui.friendCopyCodeBtn.disabled = !onlineSessionActive || !isFriendTurnExportWindow();
   }
   if (ui.friendBackMenuBtn) {
     ui.friendBackMenuBtn.hidden = true;
     ui.friendBackMenuBtn.disabled = true;
   }
   if (ui.friendLoadCodeBtn) {
-    ui.friendLoadCodeBtn.hidden = false;
-    ui.friendLoadCodeBtn.disabled = false;
+    ui.friendLoadCodeBtn.hidden = !onlineSessionActive;
+    ui.friendLoadCodeBtn.disabled = !onlineSessionActive;
     ui.friendLoadCodeBtn.textContent = "Load Turn Link";
   }
   if (ui.friendManualLoadWrap) {
-    ui.friendManualLoadWrap.hidden = !state.manualLoadFallback.friend;
+    ui.friendManualLoadWrap.hidden = !onlineSessionActive || !state.manualLoadFallback.friend;
   }
   if (state.rtcOpponentAbandoned) {
     if (ui.friendInterstitialTitle) {
@@ -4723,7 +4444,7 @@ function renderFriendInterstitial() {
     }
     return;
   }
-  if (!isFriendTurnExportWindow()) {
+  if (onlineSessionActive && !isFriendTurnExportWindow()) {
     if (ui.friendCopyCodeBtn) {
       ui.friendCopyCodeBtn.disabled = true;
     }

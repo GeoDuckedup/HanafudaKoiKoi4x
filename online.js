@@ -1,4 +1,6 @@
 (function attachOnlineSessionController() {
+  let reconnectLockInFlight = false;
+
   function createOnlineSessionController(deps) {
     const {
       state,
@@ -22,6 +24,10 @@
       persistOnlineSessionContext,
       onRtcReceiveTurnCode,
     } = deps;
+    const utils = window.HKKUtils;
+    if (!utils || typeof utils.computeCodeChecksum !== "function") {
+      throw new Error("Utils bootstrap not loaded.");
+    }
     const PRESENCE_PATIENCE_MS = 5 * 60 * 1000;
     const RECONNECT_TIMEOUT_MS = 30_000;
 
@@ -296,15 +302,6 @@
       return `${RTC_SIGNAL_PREFIX}${encodeBase64UrlUtf8(json)}`;
     }
 
-    function computeCodeChecksum(payload) {
-      let hash = 2166136261;
-      for (let i = 0; i < payload.length; i += 1) {
-        hash ^= payload.charCodeAt(i);
-        hash = Math.imul(hash, 16777619);
-      }
-      return (hash >>> 0).toString(36).toUpperCase();
-    }
-
     function encodeStateForOnline() {
       const fullCode = String(encodeStateToCode() || "").trim();
       const parts = fullCode.split(".");
@@ -331,7 +328,7 @@
 
       const trimmedJson = JSON.stringify(trimmedSnapshot);
       const trimmedPayload = encodeBase64UrlUtf8(trimmedJson);
-      const checksum = computeCodeChecksum(trimmedPayload);
+      const checksum = utils.computeCodeChecksum(trimmedPayload);
       return `${prefix}.${trimmedPayload}.${checksum}`;
     }
 
@@ -616,8 +613,9 @@
     async function handleRtcDisconnectAutoReconnect() {
       if (!isOnlineFriendSessionActive()) return false;
       if (state.rtcOpponentAbandoned) return false;
-      if (state.rtcReconnectInFlight) return false;
+      if (reconnectLockInFlight) return false;
       if (!state.rtcRoomCode || !state.rtcRole) return false;
+      reconnectLockInFlight = true;
       state.rtcReconnectInFlight = true;
       state.rtcReconnectFailed = false;
       setFriendInterstitialOpen(true, state.currentPlayer);
@@ -630,7 +628,6 @@
       });
       try {
         await Promise.race([reconnectPromise, timeoutPromise]);
-        state.rtcReconnectInFlight = false;
         state.rtcReconnectFailed = false;
         setFriendInterstitialStatus("Reconnected.", false);
         applyOnlineWaitingStateFromCurrentTurn("reconnected");
@@ -638,13 +635,15 @@
         return true;
       } catch (err) {
         console.warn("online reconnect failed", err);
-        state.rtcReconnectInFlight = false;
         state.rtcReconnectFailed = true;
         state.rtcStatus = "error";
         setFriendInterstitialOpen(true, state.currentPlayer);
         setFriendInterstitialStatus("Could not reconnect. Try again or return to menu.", true);
         if (state.ready) renderAll();
         return false;
+      } finally {
+        reconnectLockInFlight = false;
+        state.rtcReconnectInFlight = false;
       }
     }
 

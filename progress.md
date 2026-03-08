@@ -1,0 +1,1130 @@
+Original prompt: Get rid of need for manuals folder. Go through the code and make sure it no longer requires pulls to the manual.
+
+Current defaults (runtime):
+- Room TTL: 30 days
+- Rate limit window: 30 s between room creations
+- Keepalive interval: 30 s
+- Reconnect timeout: 30 s
+- Presence patience: 5 min
+
+- Removed all `assets/manual` sheet paths from `SHEET_PATHS`.
+- Removed legacy `SPRITE_LAYOUT` manual fallback mapping.
+- Switched to strict custom-only sprite source (`MONTH_SPRITES`) for all 12 months.
+- Added fail-fast guard in `buildDeck()` if any month sprite mapping is missing.
+- Next: delete `assets/manual` folder and verify no references remain.
+- Deleted `assets/manual` folder from the project.
+- Verified there are no remaining `assets/manual` or legacy manual-sheet identifiers in `game.js`, `index.html`, or `style.css`.
+- Validation limits: runtime smoke test not executed here because local `node` is unavailable in this environment.
+- Implemented 4-of-month sweep capture rule:
+  - Phase 1 (hand play): if 3 matching month cards are on field, playing 4th card captures all 4.
+  - Phase 2 (deck draw): if drawn card matches 3 field cards of same month, captures all 4.
+- Updated human selection flow so only 2-match cases prompt for field choice.
+- Updated AI move evaluation to recognize and value 4-card month sweeps.
+- Added helper `takeAllMonthMatchesFromField(month)`.
+- Validation limits: runtime smoke test not executed here because local `node` is unavailable in this environment.
+- Phase 1 interaction change implemented: human must click field card to collect whenever there is a match (1, 2, or 3).
+- Hand phase now enters selection mode for 1/2/3 matches instead of auto-capturing 1 and 3.
+- Draw phase now enters selection mode for human for 1/2/3 matches; resolution handles 3-match sweep capture.
+- CPU flow unchanged in this phase (still auto-resolves).
+- Validation limits: runtime smoke test not executed because local `node` is unavailable in this environment.
+- Phase 2 implemented: CPU readability/pacing layer.
+- Added staged CPU beats with delays:
+  - think beat before playing hand card
+  - field target preview beat (highlights target/sweep set)
+  - delayed draw resolution beat after deck pull outcome
+  - delayed pass vs koi-koi decision beat
+- Added `state.aiPreview` and render support so field highlights are visible during CPU planning.
+- Added `scheduleAIStep()` and refactored AI timers to support multi-step CPU turn pacing.
+- Added `ai_preview` output in `renderGameToText` for deterministic inspection.
+- Validation limits: runtime smoke test not executed because local `node` is unavailable in this environment.
+- Phase 3 implemented: CPU now simulates field-pick interaction for deck-draw matches.
+- For CPU draw matches (1/2/3), game now shows aiPreview highlight + prompt, pauses, then auto-confirms capture.
+- 3-match draw case now visually previews sweep before capturing all four.
+- Added player-only deck flip phase for draw step:
+  - after phase-1 resolves, drawn card is staged face-down in Recent Deck Pull
+  - player must tap Recent Deck Pull to reveal
+  - reveal lingers briefly before resolving to field/capture selection
+- Added `awaitingDeckFlip` state + draw reveal timer and cleanup hooks.
+- Added deck panel glow/pulse + pointer cursor while awaiting player flip.
+- Added `awaiting_deck_flip` in `renderGameToText`.
+- Implemented deck-flip phase for CPU (Step 2):
+  - CPU now stages face-down draw in Recent Deck Pull
+  - auto-reveals after short delay
+  - lingers face-up briefly
+  - then resolves to no-match field land or existing CPU match-preview/capture flow
+- `awaitingDeckFlip` now covers both player and CPU and is exposed in `renderGameToText` with owner name.
+- Rule update: Sake Cup (9a) no longer counts as a basic/plain card.
+- Kept Sake Cup as seed and preserved Moon/Blossom viewing yaku checks.
+- Updated both scoring and AI captured-stat calculations to remove Sake-as-basic contribution.
+- Added a second card corner indicator for card type beside month indicator.
+- New type badge codes: `BRT` (light), `SED` (seed), `SCR` (scroll), `PLN` (basic/plain).
+- Badge rendering now uses inline badge elements on cards (hand, field, and captured mini cards), not pseudo-content strings.
+- Type badge is elongated and color-coded by type; month badge remains compact and immediately to its right.
+- Mini captured cards also show both badges with scaled-down sizing.
+- Validation limits: unable to run `node`/Playwright in this environment (`node: command not found`), so runtime smoke test was not executed here.
+- Swapped badge positions per UI request: month badge is now on the left, type badge on its right (including mini cards).
+- Capture display now auto-sorts on every render (no mutation of source captured arrays).
+- Display order implemented: bright -> seed -> text scroll -> blue scroll -> red scroll -> plain.
+- Tie-breakers: month ascending, then card id for deterministic left-to-right ordering.
+- Moved type badge to top-right of cards; month badge remains top-left.
+- Applied to both regular and mini cards via CSS-only position updates.
+- Moved rules panel section to render below the bottom title bar (`Hanafuda Koi-Koi` + rules toggle).
+- Rules toggle behavior unchanged, but expanded rules now appear directly underneath that bar.
+- Rules panel scroll behavior hardened: panel has `max-height: 42vh` and `overflow-y: auto`.
+- Converted rules content into expandable accordion sections using native `<details>` blocks.
+- Each major rules group now expands/collapses independently in the rules panel.
+- Added accordion styling for section headers, plus/minus indicator, and section body spacing.
+- Corrected rules text note: Sake Cup does not count as basic.
+- Replaced rules panel text with the new player-friendly instruction set from chat.
+- Kept accordion UI and section-by-section expand/collapse behavior.
+- New sections now include: Objective, Cards and Matching, Setup, Turn Structure, Capture Rules, Yaku/Pass/Koi-Koi, Round-to-Round Start Rules, Scoring, Quick Start.
+- Added CPU phase-1 selected-card preview in CPU profile panel (avatar area).
+- During CPU turn, selected hand card now shows briefly before the card is played to field.
+- Preview uses new `cpu-phase1-preview-canvas` and temporary state `cpuPhase1PreviewCardId`.
+- Avatar hides during preview and restores automatically when phase-1 resolve begins.
+- Added `cpu_phase1_preview` to `render_game_to_text` payload for test/debug visibility.
+- Validation: static server checks for index/js/css returned HTTP 200; Playwright smoke could not run here because `npx` is unavailable.
+- Fixed CPU profile default layout artifact by forcing hidden phase1 preview canvas to fully collapse (`display: none !important` when `[hidden]`).
+- Moved score/meta row (`CPU | Game x/12 Starts/Turn | You`) below context action bar.
+- Relocated `Table Xx | Last Koi-Koi` indicator into field section on a centered status row.
+- Added multiplier intensity visuals for table indicator via classes `mult-1..mult-4`:
+  - 1x neutral
+  - 2x warmer with light pulse/glow
+  - 3x stronger orange-red pulse/glow
+  - 4x red with strongest pulse/glow
+- `renderTop()` now updates multiplier class each frame based on `state.tableMultiplier`.
+- Updated hand instruction note behavior: now shows "Pick a card from your hand to play." when it's the human's actionable hand-selection state.
+- Note priority now is: field choice > deck reveal > hand pick > hidden.
+- Made hand instruction bar persistent to prevent layout shifting (always rendered with fixed min-height).
+- Added note state styling classes: active (blue) vs muted (dim).
+- Updated note logic to include simple CPU state text: "CPU playing.".
+- Idle state now shows blank text in the same persistent bar.
+- Extended persistent instruction bar to guide decision and progression states.
+- Added human decision prompt with multiplier hint: "Choose Pass, or Koi-Koi for +Xx (to Yx)."
+- Added forced-koi message when pass is disabled.
+- Added round-end prompt: winner/no-scorer summary + "Click Next Game."
+- Added match-end prompt: final score summary + "Click New Match."
+- Replaced one-off field choice auto-scroll with centralized action-target snapping.
+- Added `focusActiveActionTarget()` with priority-based targets:
+  - field choice -> field
+  - draw reveal -> recent deck pull
+  - pass/koi or next/new buttons -> context bar
+  - actionable hand pick -> player hand zone
+  - CPU active turn -> field (or recent deck pull during draw reveal)
+- Added dedupe guard (`autoFocusTargetKey`) so repeated renders don't keep re-snapping the same target.
+- Replaced center-based auto snap with smart minimal-scroll behavior.
+- New helper `scrollTargetIntoViewSmart()` scrolls only enough to keep target visible, with bottom-edge bias.
+- Action targets now avoid center overshoot and appear near the bottom of viewport when scrolled into view.
+- Removed field helper chip from field header to avoid overlapping/unreadable popups near multiplier status.
+- Deleted `#field-helper` element from HTML, removed helper styles, and removed helper update logic in `renderChoiceMode()`.
+- Guidance is now exclusively through the persistent instruction bar above the player hand.
+- Removed CPU profile risk-style subtitle (High Risk / Balanced / Low Risk) from UI.
+- CPU profile now shows only avatar and CPU name label.
+- Mobile-only CPU hand layout updated to 4 columns x 2 rows (`max-width: 699px`), while desktop remains 8 columns x 1 row.
+- Added explicit round-start snap to top in `startRound()`.
+- Reset `autoFocusTargetKey` at round start so action-target snapping resumes cleanly after top reset.
+- Implemented phase 1 + 2 foundation for start/load flow and game codes.
+- Added startup menu gating:
+  - `init()` now shows start menu after assets preload instead of auto-starting a match.
+  - New menu actions wired: `New Game`, `Load From Code`.
+- Added in-game code panel wiring:
+  - `Code` header toggle opens/closes panel.
+  - `Refresh Code`, `Copy Code`, `Load Code`, `Close` are wired.
+- Added code engine in `game.js`:
+  - Versioned format `HKK1.<payload>.<checksum>`.
+  - UTF-8 base64url payload encoding/decoding.
+  - FNV-style checksum validation.
+  - Snapshot serialization of full round/match state (players, field, pile, pending states, multiplier, logs, etc.).
+  - Snapshot validation for shape/types/known card IDs.
+  - Hydration + runtime state ownership checks to prevent duplicate-card corruption.
+  - Resume logic after load for CPU pending decision/deck-flip flows.
+- Added styles for new UI elements in `style.css`:
+  - `.top-actions`, `.code-panel*`, `.start-menu*`, status states.
+- Smoke check run via local HTTP server (outside sandbox):
+  - `index.html`, `game.js`, `style.css` all served with HTTP 200.
+  - Confirmed HTML contains `#code-panel`, `#start-menu`, `#start-load-btn`.
+- Test limitation:
+  - Playwright scripted smoke test could not be run in this environment because `node`/`npx` are unavailable.
+- Removed CPU avatar/profile UI per mobile layout fix request.
+- CPU hand area now renders as a single 1x8 horizontal strip on all viewports (desktop unchanged behavior, mobile uses horizontal scroll instead of 2x4 wrap).
+- CPU phase-1 reveal moved to in-hand slot:
+  - during preview delay, the selected CPU hand card is shown face-up in its actual hand position;
+  - all other CPU hand cards remain face-down.
+- Deleted avatar/profile markup from `index.html` and removed related CSS/JS hooks.
+- Validation smoke check:
+  - `index.html` served 200, contains only `#cpu-hand` in CPU hand section.
+  - Confirmed avatar/profile selectors no longer exist in served HTML/CSS.
+- CPU hand readability tweak: phase-1 CPU reveal is now left-anchored.
+- During CPU preview, selected card is rendered in the leftmost CPU-hand slot; remaining cards are shown after it.
+- Visual effect: CPU hand now reads like a train queue (left shown card -> card leaves -> remaining hand shifts).
+- Gameplay logic unchanged; this is a display-only reorder in `renderHands()`.
+- Major HUD refactor applied:
+  - Removed old `CPU | Game x/12 | You` score/meta row.
+  - Added inline score badges to hand headers:
+    - `CPU Hand` now includes red/bold `#cpu-score-inline`.
+    - `Your Hand` now includes red/bold `#player-score-inline`.
+  - Added `turn-meta` line in field section: `Starts: ... | Turn: ...`.
+- Bottom title row button cluster updated:
+  - Added `Game 1 / 12` button to the right-side cluster, to the left of `Action Log`.
+  - Right-side order is now: `Game 1/12`, `Action Log`, `Code`, `Rules`.
+- Added match round summary system:
+  - New panel `#game-summary-panel` with 4 columns: `Month`, `You`, `CPU`, `Mult`.
+  - Populated from new state field `roundHistory` and rendered by `renderRoundSummary()`.
+  - Unplayed rounds show `-`; no-score rounds are marked via styling in `Mult` column.
+- Save system updated for new round summary data:
+  - Save code version bumped to `HKK2` (`SAVE_CODE_PREFIX = "HKK2"`, `SAVE_CODE_VERSION = 2`).
+  - Snapshot now includes required `roundHistory`.
+  - Validation/hydration now enforces roundHistory schema and restores it.
+  - This is intentionally not backward compatible with old `HKK1` codes.
+- Round history write paths:
+  - `endRoundWithWinner`: records month + winner points + multiplier.
+  - `endRoundDraw`: records month with 0/0 and current multiplier.
+- Structural cleanup:
+  - Rewrote `index.html` to a single valid document (previous duplicate full-document artifact removed).
+- Smoke check:
+  - Local server served updated HTML/CSS/JS (HTTP 200).
+  - Confirmed new markers for inline scores, game-summary button/panel, and `HKK2` save constants.
+- Moved `CPU Hand` section to sit directly above `Your Hand` (new order: captures -> field -> CPU hand -> player hand).
+- Added compact CPU-hand-only card sizing (about 60% of player hand size):
+  - mobile/default: `44x55`
+  - desktop: `50x62`
+- Kept `CPU Hand` and `Your Hand` header text/score styling unchanged and consistent.
+- No gameplay logic changes; display-only layout and sizing update.
+- Implemented reversible Phase-1 hand preview flow improvements:
+  - Hand preview pending states now fully support both `handMatch` and `handPlace` through save/load (`serialize`, `validate`, `hydrate`).
+  - `handPlace` pending ownership is now validated on hydrated states.
+- Added no-match placement preview in Field:
+  - While previewing a no-match hand card, a duplicate ghost card now appears in Field with the same glow language as choice targets.
+  - Preview card is visually marked as a placement preview (`PLACE`) and remains non-interactive.
+- Instruction bar now uses contextual pending prompts:
+  - Replaced generic "Finish field choice above." with `getChoicePromptText(pending)` so hand-preview states explicitly tell the player to confirm/cancel.
+- Focus behavior refined for preview type:
+  - `handPlace` preview now auto-focuses to player-hand zone instead of field zone; match previews still focus field.
+- Adjusted no-match placement interaction for consistency:
+  - `handPlace` now confirms by tapping the glowing preview card in the Field (not by tapping hand card again).
+  - Tapping the selected hand card again now cancels preview and returns to hand selection.
+  - `handPlace.options` now includes the pending hand card id so field-click routing can resolve the preview target.
+- Updated handPlace instruction copy:
+  - Prompt now says to tap preview field card to place, or selected hand card to cancel.
+- Auto-focus behavior updated:
+  - `handPlace` pending now focuses Field (confirm target) instead of player hand.
+- Visual affordance update:
+  - Preview placement card keeps glow and is now marked selectable for cursor/interaction consistency.
+- Smoke check:
+  - Local server served `index.html` and `game.js` with HTTP 200 on port 5185.
+- Hand-match preview cancel parity implemented:
+  - While `handMatch` preview is active, tapping the selected hand card again now cancels preview (same behavior as `handPlace`).
+  - Switching to a different hand card during preview still works as before.
+- Updated hand-match instruction copy to include explicit cancel guidance and 3-match sweep wording.
+- Smoke check: local server served `index.html` and `game.js` with HTTP 200 on port 5185.
+- Phase 1 (multiplayer groundwork) implemented with no gameplay-flow switch yet.
+- Save/version layer:
+  - Save prefix/version bumped to `HKK3` / `v3` for new exports.
+  - Backward loader now accepts `HKK2` and `HKK3` via prefix->version map.
+  - Added strict prefix/version pairing check (`Version mismatch for <prefix>`).
+- New multiplayer-ready state fields added:
+  - `playMode`, `friendFlow`, `viewerPlayerIndex`, `interstitial`, `turnCheckpointReady`, `lastExportMeta`.
+- Snapshot schema expanded for `v3` only:
+  - serializes/deserializes/validates new multiplayer-ready fields.
+  - `v2` snapshots skip these new checks and load with safe defaults.
+- Player model expanded:
+  - `createPlayer(name, isHuman, roleLabel)` now supports `roleLabel` for upcoming friend-mode labeling.
+  - Snapshot player entries now include optional `name`, `roleLabel`, `isHuman`.
+- Applied safe defaults for new fields on:
+  - `startNewMatch()` and `startRound()`.
+  - `applySnapshot()` when loading legacy `HKK2` snapshots.
+- Added `computeTurnCheckpointReady()` and wired it into render/export so checkpoint metadata is computed from live state.
+- Added multiplayer metadata to `render_game_to_text` payload for test/debug visibility.
+- Smoke check: local HTTP server returned 200 for `index.html` and updated `game.js` on port 5185.
+- Test limitation: could not run Playwright scripted smoke in this environment because `npx` is unavailable.
+- Step 2 implemented: start-menu mode selection + friend flow selection wiring.
+- Start menu UI changed:
+  - Replaced single `New Game` with `Play with CPU` and `Play with Friend`.
+  - Added friend sub-flow chooser (hidden by default):
+    - `Hotseat (Same Phone)`
+    - `Code-Send (Two Devices)`.
+- Added start-menu UI ids and handlers:
+  - `start-mode-cpu-btn`, `start-mode-friend-btn`, `start-friend-flow`, `start-friend-hotseat-btn`, `start-friend-code-btn`.
+  - New handlers: `onStartModeCpuFromMenu`, `onStartModeFriendFromMenu`, `onStartFriendHotseatFromMenu`, `onStartFriendCodeFromMenu`.
+  - Added `setStartFriendFlowOpen()` and reset it in `showStartMenu()`/`hideStartMenu()`.
+- `startNewMatch(options)` now supports mode args:
+  - `{ playMode: "cpu" }` starts current CPU behavior.
+  - `{ playMode: "friend", friendFlow: "hotseat"|"code" }` initializes two-human players (`Player 1`, `Player 2`) and sets friend state fields.
+  - Default behavior with no args now uses existing `state.playMode/state.friendFlow` so New Match can preserve mode in future flows.
+- CSS additions for new start menu layout:
+  - `.start-mode-actions`, `.start-friend-flow`, `.start-subtitle`.
+- Smoke check:
+  - local HTTP server returned 200 for `index.html`, `style.css`, and `game.js` on port 5185.
+- Test limitation:
+  - Playwright smoke test not run here because `npx` is unavailable.
+- Fixed start-menu friend-mode submenu glitch:
+  - Added `.start-friend-flow[hidden] { display: none !important; }` so hidden state is respected.
+  - Updated `onStartModeFriendFromMenu()` to toggle submenu open/closed instead of only forcing open.
+- Smoke check: index/js/css all served HTTP 200 on port 5185.
+- Step 3 (Visibility policy integration) implemented in render/input layer.
+- Added visibility/input policy helpers:
+  - `isFriendMode`, `getViewerPlayerIndex`, `getDisplayBottomPlayerIndex`, `getDisplayTopPlayerIndex`, `canRevealBottomHand`, `getInteractiveHumanPlayerIndex`.
+- Input flow now targets dynamic interactive human player (not hardcoded player 0):
+  - `onPlayerHandClick`, `previewPlayerHandCard`, `clearPlayerHandPreview`, `onFieldClick`, and `onDrawPreviewClick` updated.
+  - In friend mode, input is blocked unless `viewerPlayerIndex === currentPlayer`.
+- Render flow now uses viewer/opponent mapping:
+  - `renderTop`, `renderHands`, `renderField`, `renderChoiceMode`, `renderCaptured` updated to respect display indices.
+  - Opponent/top hand is always hidden (backs), bottom hand visibility controlled by `canRevealBottomHand()`.
+  - If bottom hand is not visible, it renders backs only and remains locked.
+- Focus/action targeting updated for dynamic interactive player in `getActiveActionFocusKey`.
+- `startRound()` now resets friend viewer to current turn owner (`viewerPlayerIndex = currentPlayer`) in friend mode.
+- `render_game_to_text` updated with visibility metadata and masked bottom hand output when hidden.
+- Safety fix for legacy/HKK2 load in CPU mode:
+  - `applySnapshot()` now defaults `viewerPlayerIndex` to `0` for CPU mode (prevents accidental CPU-hand reveal on loads where `currentPlayer===1`).
+- Smoke checks:
+  - Local HTTP server served `index.html` and updated `game.js` with HTTP 200 on port 5185.
+- Test limitation:
+  - Playwright smoke not run in this environment (`npx` unavailable).
+- Step 4 implemented: friend labels + text normalization across live HUD/status copy.
+- Dynamic label binding now updates hand/capture headers and round-summary column headers from player names (`Player 1/Player 2` in friend mode, `You/CPU` in cpu mode).
+- Added `getLatestRoundOutcome()` and switched round-end instruction text to derive from `roundHistory` state instead of hardcoded `You|CPU` regex matching.
+- Match-end instruction text now uses dynamic player names (`<name> wins ...`) and no longer assumes `You/CPU`.
+- CPU-turn muted note now uses current player name (`<name> playing.`), keeping copy mode-safe.
+- Decision prompt forced-koi line now uses owner name (`<name> is forced to Koi-Koi.`).
+- Smoke check: local server on port 5185 returned HTTP 200 for `/` and `/game.js`; verified updated markers in served JS (`getLatestRoundOutcome`, dynamic wins text).
+- Test limitation: Playwright scripted smoke still not run in this environment because `node`/`npx` are unavailable.
+- Step 5 implemented: friend-mode turn handoff flow (hotseat + code-send) with interstitial overlay.
+- Added new UI overlay (`#friend-interstitial`) with mode-aware content:
+  - Hotseat: privacy pass screen + ready/continue confirmation.
+  - Code-send: share screen with generated turn code + copy button + optional continue on same device.
+- Added friend interstitial state/render/event wiring:
+  - New UI bindings in `cacheUI()` and handlers in `bindUI()`.
+  - New helpers: `setFriendInterstitialOpen`, `prepareFriendTurnHandoff`, `onFriendInterstitialCopyCode`, `onFriendInterstitialContinue`, `setFriendInterstitialStatus`, `renderFriendInterstitial`.
+- Turn transition integration:
+  - `moveToNextPlayer()` now records friend handoff metadata (`lastExportMeta`) and opens interstitial in friend mode at end-of-turn handoff.
+  - CPU mode remains unchanged.
+- Code-send import behavior:
+  - In `applySnapshot()`, if loaded state is friend+code and interstitial is open, importer auto-claims next-player perspective and closes interstitial so play can continue immediately.
+- Checkpoint readiness update:
+  - `computeTurnCheckpointReady()` now returns false during hotseat interstitial lock state.
+- Menu behavior hardening:
+  - Opening/closing start menu now also closes friend interstitial state.
+- Smoke check:
+  - Local HTTP server on 5185 returned 200 for `/`, `/style.css`, `/game.js`.
+  - Verified new HTML/JS/CSS markers for friend interstitial and handoff functions.
+- Test limitation:
+  - Playwright scripted smoke still not run in this environment (`node`/`npx` unavailable).
+- Step 6 implemented: friend code-share UX normalization + turn-code guardrails.
+- Code panel now has dynamic friend-code labeling:
+  - Header: `Turn Code` (friend code mode) vs `Save / Load Code` (default).
+  - Export label: `Current turn code`.
+  - Import label/placeholder: `Load turn code` / `Paste turn code from other player`.
+  - Buttons: `Generate Turn Code` and `Copy Turn Code` in friend code mode.
+- Added mode guards for friend code flow:
+  - `Refresh` and `Copy` actions are blocked unless in handoff/export window (`isFriendTurnExportWindow()`).
+  - Clear status messages explain why actions are disabled before handoff.
+- Added helpers:
+  - `isFriendCodeMode()`
+  - `isFriendTurnExportWindow()`
+  - `renderCodePanel()` (called in `renderAll` for live button text/disabled state).
+- Added code-panel DOM ids for dynamic text updates:
+  - `#code-panel-head`, `#export-code-label`, `#import-code-label`.
+- Smoke check:
+  - Local server on 5185 returned HTTP 200 for `/` and `/game.js`.
+  - Verified HTML ids and JS markers for new phase-6 functions/messages are present in served output.
+- Test limitation:
+  - Playwright scripted smoke still unavailable in this environment (`node`/`npx` not present).
+- Step 7 implemented: friend code-turn checkpoint enforcement + stronger import/export guardrails.
+- Turn-code import now validates checkpoint state:
+  - In `loadCodeIntoGame()`, friend code snapshots are rejected unless `turnCheckpointReady === true`.
+  - Error shown: `This turn code is not at a valid handoff checkpoint`.
+- Friend code load success messaging now includes exporter metadata when available:
+  - `Turn code loaded (Player X, move N).`
+- `computeTurnCheckpointReady()` semantics tightened:
+  - In friend code mode, checkpoint is true only while interstitial handoff is open.
+  - Prevents non-handoff states from being treated as valid turn export checkpoints.
+- UI guard hardening for export textarea:
+  - While in friend code mode outside handoff window, export textarea is cleared.
+  - Placeholder now explains: `Turn code appears after a full turn handoff.`
+  - Prevents easy manual copy from prefilled textarea before a full-turn checkpoint.
+- Interstitial text now includes move metadata from `lastExportMeta` when present (e.g., `Player 1 move 3`).
+- Smoke check:
+  - Local server on 5185 returned HTTP 200 for `/` and `/game.js`.
+  - Verified served markers for checkpoint validation, updated status copy, and export textarea guard.
+- Test limitation:
+  - Playwright scripted smoke still unavailable in this environment (`node`/`npx` missing).
+- Refactor foundation: split runtime state into `gameState`, `turnState`, and `sessionState` with compatibility proxies on `state.*`.
+- Added declarative yaku tables:
+  - `FIXED_YAKU_RULES` for fixed-point yaku.
+  - `INCREMENTAL_YAKU_RULES` for seed/scroll/basic scaling.
+  - `computeYaku()` now evaluates those tables and preserves existing scoring outputs.
+- Persistence upgrades:
+  - added migration pipeline (`SAVE_MIGRATIONS` + `migrateSnapshotToLatest`).
+  - implemented `migrateV2SnapshotToV3` to normalize old `HKK2` payloads before validation.
+- Fixed friend-flow normalization bug:
+  - `normalizeFriendFlow()` now preserves `hotseat` / `code` / `hybrid` instead of forcing all to `hybrid`.
+- AI boundary improvement:
+  - AI decision/card helpers now accept an explicit game object parameter (defaulting to current state), enabling pure-call usage in future tests.
+- Validation limits:
+  - no local JavaScript runtime (`node`, `npx`, `jsc`) is available here, so runtime smoke tests could not be executed in this environment.
+- Share-link UX update implemented for multiplayer handoff + save/load.
+- Code panel is now link-first:
+  - Added `Copy Turn Link` action.
+  - Added `Advanced` toggle that reveals raw-code textarea/actions only when needed.
+  - Import copy now reads `Load from link or code` with link/code parsing on load.
+- Start-menu and friend-handoff copy updated to link-first language (`Enter Link or Code`, `Copy Turn Link`, `Load Turn Link`).
+- Added robust link/code parsing + generation helpers:
+  - `buildShareLinkFromCode(code)` for `#t=` links.
+  - `extractCodeFromInput(raw)` accepts raw `HKK...`, `#t=...`, full URL hash/query token forms.
+  - `tryLoadFromLocationHash()` supports direct-open handoff links and clears hash after successful load.
+- Friend interstitial copy now exports link text (not raw code) while retaining strict checkpoint validation.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/`, `/game.js`, `/style.css` all HTTP 200.
+  - Verified markers for `copy-link-btn`, `toggle-advanced-btn`, `code-advanced`,
+    `buildShareLinkFromCode`, `extractCodeFromInput`, and `tryLoadFromLocationHash`.
+- UX cleanup pass for turn-link loading implemented (clipboard-first, less clutter).
+- Start menu now defaults to simple actions:
+  - `Load Turn Link` attempts clipboard auto-load first.
+  - Manual paste area is hidden by default and only revealed when clipboard is unavailable/empty or invalid.
+  - Added fallback controls: `#start-manual-load-wrap`, `#start-load-manual-btn`.
+- Friend interstitial now defaults to clean handoff controls:
+  - Removed visible turn-link dump textarea from normal flow.
+  - `Load Turn Link` is clipboard-first; manual paste section appears only on failure.
+  - Added fallback controls: `#friend-manual-load-wrap`, `#friend-load-manual-btn`.
+- Added JS helpers for smart loading:
+  - `readClipboardTextSafe()`
+  - `tryLoadFromClipboardOrManual(target)`
+  - visibility toggles `setStartManualLoadVisible()` / `setFriendManualLoadVisible()`.
+- Friend copy-link flow no longer depends on rendering a visible textarea; fallback copy uses a temporary hidden textarea only when needed.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified new marker ids for manual fallback wrappers/buttons.
+  - Verified old interstitial turn-link dump marker is absent from served HTML.
+- Multiplayer autoplay bugfix (friend link-import handoff):
+  - Root cause: post-load resume logic used hardcoded AI index `1`, which collides with friend mode where Player 2 is also index `1`.
+  - Added `getCpuPlayerIndex()` and switched AI resume/scheduling to target the actual non-human player only.
+  - Updated `resumeLoadedStateFlow`, `resolveCpuPendingDecision`, `resumeCpuDeckFlipFlow`, `queueAITurn`, and `performAITurn` to use CPU index discovery instead of `=== 1` assumptions.
+  - Updated phase-1 CPU preview cleanup in `executePlayFromHand()` to clear by actual CPU index.
+- Friend import safety hardening:
+  - When loading from the friend interstitial (`target="friend"`), non-friend snapshots now fail fast with `This is not a friend turn link`.
+  - On snapshot hydrate, friend mode now forces both players to `isHuman=true` to prevent unintended AI scheduling from malformed/tampered payloads.
+- Implemented lightweight friend handoff "Turn Recap Playback" (visual narration, not deterministic simulation).
+- New recap state added:
+  - `activeTurnRecap` (in-progress turn summary),
+  - `lastTurnRecap` (serialized handoff summary),
+  - `turnReplay` (playback runtime: active/note/timer/key).
+- Turn recap capture now records:
+  - phase-1 played card + hand result (capture/place/sweep),
+  - draw card + draw result (capture/place/sweep/deck-empty),
+  - pass/koi decision + multiplier transition.
+- Handoff integration:
+  - on turn handoff (`moveToNextPlayer`), recap is committed for export/import.
+  - on friend hotseat continue and friend link import, receiver gets staged recap playback.
+- Playback behavior:
+  - drives `Recent Deck Pull` visuals + instruction bar text over short timed beats,
+  - locks input while replay is active (`getInteractiveHumanPlayerIndex` returns null),
+  - auto-focuses draw preview during replay and then returns to normal state.
+- Save payload integration:
+  - `lastTurnRecap` included in snapshot and validated/hydrated.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified markers for recap capture/playback functions and friend handoff hooks in served JS.
+- Phase-2 human no-match flow updated to require field confirmation click (parity with phase-1 no-match placement UX).
+- Added new pending selection mode: `drawPlace`.
+  - On human draw reveal with no match, card is now staged as preview on field.
+  - Player must tap highlighted preview field card to place and continue.
+- Added `resolveDrawPlace(...)` and wired `onFieldClick(...)` for `drawPlace`.
+- Extended save/load support for `drawPlace`:
+  - serialize/validate/hydrate pending selection now handles `drawPlace`.
+  - hydrated ownership checks now allow `drawPlace` preview option to reference the drawn card (not field card).
+- Updated field render + instruction copy to show draw placement preview and explicit prompt text.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified served JS markers for `drawPlace` and `resolveDrawPlace` flow.
+- Multiplayer recap readability pass:
+  - During replay, draw panel header now switches from `Recent Deck Pull` to `Player X Recap`.
+  - Recap pacing slowed (`TURN_REPLAY_STEP_MS` increased to 1500ms) for easier reading.
+  - Added recap-only flashing visual treatment on recent-card panel (`.draw-preview.recap-active`) with `recapFlash` keyframes.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified markers for `draw-preview-label`, recap label toggle in JS, updated replay timing constant, and recap flash CSS.
+- Recap sequencing updated to explicit staged beats per turn (friend multiplayer handoff).
+- Replaced old single-summary replay line with structured `buildTurnRecapSteps(...)` flow:
+  - phase 1 hand pick (`selected ... from hand`)
+  - phase 1 result (capture/sweep/place)
+  - phase 2 deck pull (`drew ... from deck`)
+  - phase 2 result (capture/sweep/place/deck-empty)
+  - optional pass/koi decision beat using last turn card as visual anchor
+  - final `Your turn.` step
+- This preserves the existing recap location and visuals while making each action legible in order.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified served JS markers for `buildTurnRecapSteps` and staged recap step text.
+- Recap navigation changed to hybrid mode:
+  - auto-advance every `2600ms` (`TURN_REPLAY_STEP_MS = 2600`)
+  - tap-to-advance enabled on the recap panel during replay
+  - tap guard added (`TURN_REPLAY_TAP_GUARD_MS = 220`) to avoid accidental double-skip
+- Recap step copy now includes inline guidance:
+  - intermediate steps: `Tap to continue (n/total).`
+  - final step: `Tap to start your turn.`
+- Implemented shared replay step runner `advanceTurnReplayStep(...)` so timer and tap use the same progression logic.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified served JS markers for hybrid recap constants and step runner.
+- Step 8 implemented: strict friend code-turn import invariants.
+- Added `validateFriendCodeSnapshotForImport(snapshot)` and applied it in `loadCodeIntoGame()` before hydration.
+- Friend code imports now require all of the following:
+  - `playMode === friend` and `friendFlow === code` snapshots must be at handoff checkpoint (`turnCheckpointReady === true`).
+  - `interstitial.open === true` with a valid `nextPlayerIndex`.
+  - `currentPlayer` must match `interstitial.nextPlayerIndex`.
+  - `lastExportMeta` must exist with valid exporter index and positive turn number.
+  - exporter must differ from receiver (`nextPlayerIndex`).
+- This closes remaining loopholes where malformed/non-handoff friend snapshots could still be loaded.
+- Smoke check:
+  - Local server on 5185 returned HTTP 200 for `/` and `/game.js`.
+  - Verified served JS markers for `validateFriendCodeSnapshotForImport` and new invariant error strings.
+- Test limitation:
+  - Playwright scripted smoke still unavailable in this environment (`node`/`npx` missing).
+- Unified friend mode update implemented (merged former hotseat/code branches into one flow).
+- Start menu now has one `Play with Friend` action (no friend sub-mode chooser).
+- Friend interstitial now always supports both handoff paths:
+  - local pass-device (`<Next Player> Ready`)
+  - async code-send (`Copy Turn Code`)
+  - plus in-panel import (`Load Turn Code`) via new `#friend-import-code` and `#friend-load-code-btn`.
+- Added interstitial import handler:
+  - `onFriendInterstitialLoadCode()` calls `loadCodeIntoGame(..., "friend")`.
+  - `setCodeStatus()` now supports `target="friend"` so load/copy errors render in interstitial status area.
+- Normalized friend flow state:
+  - Default `state.friendFlow` is now `hybrid`.
+  - `normalizeFriendFlow()` maps legacy `hotseat`/`code`/`hybrid` to runtime `hybrid`.
+  - `validateFriendFlow()` now accepts `hotseat`, `code`, and `hybrid` for backward compatibility.
+- Snapshot apply behavior updated:
+  - Friend snapshots with open interstitial now auto-claim next player perspective regardless of legacy flow value.
+- Turn checkpoint logic unified:
+  - `computeTurnCheckpointReady()` now uses `interstitial.open` for all friend mode.
+- Friend import strictness retained and broadened:
+  - strict handoff validation now applies to all friend snapshots (not just legacy `friendFlow===code`).
+- Removed obsolete friend subflow CSS blocks from `style.css`.
+- Smoke checks:
+  - local HTTP server returned 200 for `/`, `/game.js`, and `/style.css`.
+  - verified new friend interstitial import ids/events and absence of stale `start-friend-flow` CSS selectors in served assets.
+- Test limitation:
+  - Playwright scripted smoke still unavailable in this environment (`node`/`npx` missing).
+- Refactor pass from `Koikoi Claude ideas.pdf` completed for state-transition cleanup.
+- Added explicit pending-selection constructors:
+  - `createHandMatchPendingSelection(...)`
+  - `createHandPlacePendingSelection(...)`
+  - `createDrawMatchPendingSelection(...)`
+  - `createDrawPlacePendingSelection(...)`
+- Replaced inline pending-selection object literals in hand/draw human flows with the new constructors.
+- Added shared lifecycle timer/reset helper: `clearRoundRuntimeTimers({...})`.
+- Applied `clearRoundRuntimeTimers` at key lifecycle boundaries:
+  - snapshot load (`applySnapshot`)
+  - match start (`startNewMatch`)
+  - round start (`startRound`)
+  - round end (`endRoundDraw`, `endRoundWithWinner`)
+- Round-history key migration remains backward compatible:
+  - runtime writes use `p0/p1`
+  - reads in summary/outcome keep temporary fallback to legacy `you/cpu` for old snapshots.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` returned HTTP 200
+  - `/game.js` returned HTTP 200
+  - served JS contains markers for pending constructors, `clearRoundRuntimeTimers`, and round-summary fallback read.
+- Environment limit: `node`/`npx` are still unavailable here, so Playwright loop could not run in this session.
+- Implemented Online Multiplayer Phase 1 (Firebase signaling + WebRTC data channel transport) with async-link fallback preserved.
+- Added new `rtc.js` transport module:
+  - `createRoomCode()`, `hostRoom()`, `joinRoom()`, `sendTurnCode()`, `closeRoom()`, `onStatusChange()`.
+  - Uses Firebase RTDB for offer/answer + ICE exchange and peer `RTCDataChannel` for turn payloads.
+  - Added keepalive ping/pong over data channel.
+- Wired Firebase + RTC loading in `index.html`:
+  - added Firebase compat CDN scripts
+  - initialized `_firebaseDb` from provided `koikoi4x` config
+  - added `rtc.js` before `game.js`
+- Added start-menu entry point for online mode:
+  - `Play Online` button + prompt flow (blank = host, code = join)
+  - host copies/alerts room code
+  - guest enters waiting interstitial for first incoming handoff
+- Integrated RTC state into `game.js` session state:
+  - `rtcStatus`, `rtcRoomCode`, `rtcRole`, `rtcWaiting`
+  - `bindRtcBridge()` status synchronization and disconnect/error messaging.
+- Added auto handoff dispatch integration:
+  - new `dispatchFriendTurnHandoff(...)` wraps existing checkpoint prep and attempts RTC `sendTurnCode(...)`
+  - if send fails or peer not connected, existing copy-link interstitial flow remains available.
+  - `moveToNextPlayer()` now calls `dispatchFriendTurnHandoff(...)` in friend mode.
+- Added incoming RTC handoff handler:
+  - `onRtcReceiveTurnCode(code)` -> existing `loadCodeIntoGame(...)` pipeline.
+- Waiting-state UX + lock integration:
+  - friend interstitial now supports online waiting variant (`rtcWaiting`)
+  - input lock updated (`getInteractiveHumanPlayerIndex`) while waiting
+  - hand visibility respects waiting lock
+  - hand note includes online waiting status/room text.
+- Added `rtc` block to `renderGameToText()` payload for debug/testing visibility.
+- Smoke check (escalated local bind) passed on port 5185:
+  - Verified `index.html` contains online button + Firebase compat scripts + `rtc.js` include.
+  - Verified served `game.js` markers for online handlers/state.
+  - Verified `/rtc.js` served HTTP 200.
+- Environment limitation remains:
+  - `node`/`npx` unavailable in this environment, so Playwright loop was not run.
+- Implemented Online Multiplayer Phase 2 UI layer.
+- Added top-header connection badge:
+  - `#rtc-status-badge`, `#rtc-status-dot`, `#rtc-status-text`.
+  - Badge states now reflect idle/connecting/connected/disconnected/error and pulse on heartbeat.
+- Replaced prompt-first online menu flow with a structured start panel:
+  - New panel `#start-online-panel` with `Host New Room`, `Join Room`, `Back`, room-code input, active-room display, and inline status text.
+  - Start-menu subtitle/load controls hide while the online panel is open and restore on back/close.
+- Implemented Online Multiplayer Phase 3 behavior/recovery improvements.
+- Added pending-start gating so friend match boot only begins after RTC reaches `connected`.
+- Added RTC heartbeat listener plumbing (`rtc.onHeartbeat`) and UI pulse feedback in `game.js`.
+- Added online disconnect recovery mode in friend interstitial:
+  - shows `Connection Lost` messaging
+  - provides `Load Their Code` and `Copy My Turn Code` fallback actions.
+- Expanded interaction locks during online waiting/disconnect states:
+  - bottom hand visibility lock
+  - interactive human input lock
+  - pass-device continue lock during recovery.
+- Updated debug output:
+  - `renderGameToText().rtc` now includes `pending_start`.
+- Smoke checks:
+  - local HTTP server returned HTTP 200 for `/`, `/game.js`, and `/style.css` after phase updates.
+  - temporary test server process was manually terminated afterward.
+- Test limitation:
+  - Playwright scripted loop still could not run because `node`/`npx` are unavailable in this environment.
+- Bugfix: resolved start-menu online crash during RTC setup failures.
+- Root cause:
+  - `renderAll()` called `renderTop()` while no match had been initialized, so `state.players[topPlayerIndex]` was undefined.
+- Fix:
+  - Added pre-match guard in `renderAll()` to render RTC badge only and skip gameplay render pipeline when players are not initialized.
+  - Added matching startup guard in `renderGameToText()` returning a lightweight `mode: "startup"` payload until players exist.
+- Verification:
+  - served `game.js` over local HTTP returned 200 and contains both guards.
+- Implemented Phase A round-end acknowledgement gate (CPU + pass-device friend flow).
+- Added new game-state field `roundTransition`:
+  - tracks round-end overlay state, winner/no-score metadata, next game number, and acknowledgements.
+- Round-end flow changes:
+  - `endRoundWithWinner` and `endRoundDraw` now open a transition state (when match is not finished) instead of immediately allowing a one-click next-round jump.
+  - Transition summary message now includes `Game End ... Next Game: <Month>`.
+- Context action behavior:
+  - Friend mode round-end now shows two explicit actions: `<Player 1> Ready` and `<Player 2> Ready`.
+  - Next round starts only after both are marked ready.
+  - CPU/local mode uses a single `Next Game: <Month>` confirmation action.
+- Added transition helpers:
+  - `openRoundTransition(...)`
+  - `markRoundTransitionReady(...)`
+  - `isRoundTransitionReadyForAdvance()`
+- Save/load integration:
+  - snapshot now serializes `roundTransition`.
+  - validation + normalize/apply paths now support `roundTransition` with safe defaults for older snapshots.
+- Text/debug integration:
+  - `renderGameToText()` now includes `round_transition` payload.
+  - hand instruction line now reports round-end summary + ready status in friend mode.
+- Smoke check:
+  - served `game.js` returned HTTP 200 and includes markers for `Game End`, `round-ready-*` actions, and `round_transition` output.
+- Implemented Phase B online multiplayer round-transition sync.
+- Added RTC signal envelope (`HKKSIG1.`) for non-code control messages over existing data channel transport.
+- Added online-ready sync:
+  - local online player now sends `round-ready` signal with player index and round metadata.
+  - remote applies ack state and auto-advances when both acks are present.
+- Added online round-end state sync:
+  - at non-final round end (`endRoundWithWinner`/`endRoundDraw`), host/active side now sends a `turn-code` RTC signal containing full snapshot so remote receives the same round-transition state.
+  - incoming RTC turn snapshots now allow friend import even when not at a turn checkpoint (`allowNonCheckpointFriendImport`) to support round-end transition sync packets.
+- Updated online round-end action UI:
+  - online friend flow now shows a single local action (`I'm Ready`) instead of both player buttons.
+  - button disables to `Waiting For Opponent...` after local ack is sent.
+- Updated round-start online control lock:
+  - after round start, only the local device whose player index matches `currentPlayer` is interactive.
+  - non-active online side enters waiting mode (`rtcWaiting`) to prevent both devices from playing simultaneously before next handoff sync.
+- Smoke check:
+  - served `game.js` returned HTTP 200 and includes markers for `HKKSIG1.`, `turn-code`/`round-ready` signal handling, `round-ready-online`, and `allowNonCheckpointFriendImport`.
+- Updated online start-menu UX for explicit host/join modes.
+- Host mode behavior:
+  - `Host New Room` now uses host panel mode and hides room-code input field.
+  - Active room block is emphasized with larger centered typography in host mode.
+- Join mode behavior:
+  - First tap on `Join Room` now switches panel to join-entry mode (shows room-code input).
+  - Second tap on `Join Room` (while in join mode) performs the actual join action.
+- Added start-menu online mode state and wiring:
+  - new session field `startOnlineMode` (`host` / `join`)
+  - new helper `setStartOnlinePanelMode(...)` to toggle input visibility, button emphasis, and host styling class.
+- Markup/style updates:
+  - added `id="online-room-code-label"` in `index.html`.
+  - added host-mode styles in `style.css` via `.online-panel.is-host-mode .online-room-display`.
+- Smoke check:
+  - `index.html`, `game.js`, and `style.css` served with HTTP 200.
+  - verified served markers for `online-room-code-label`, `setStartOnlinePanelMode`, join-mode switch logic, and host-mode CSS class rules.
+- Secret/credential sweep run with focused patterns:
+  - searched for `private_key`, `BEGIN PRIVATE KEY`, `serviceAccount`, `firebase-admin`, `GOOGLE_APPLICATION_CREDENTIALS`, `.env`, and open RTDB rule patterns.
+  - no private key / service-account credentials found in repo.
+  - only Firebase web config values remain in `index.html` (expected for client-side Firebase apps).
+- Firebase hardening implemented:
+  - added Firebase Auth compat script and anonymous sign-in bootstrap in `index.html`:
+    - `_firebaseAuth`
+    - `_firebaseAuthReady`
+    - `signInAnonymously()`
+  - RTC layer now requires authenticated user before host/join operations.
+- Realtime DB access model hardened in app logic:
+  - host writes `hostUid`, clears room state on host-room create.
+  - guest join now requires existing host and claims `guestUid` via transaction (room-full protection).
+- Added Firebase rules file:
+  - `firebase.database.rules.json`
+  - rules require `auth != null` and restrict room data access/writes to room members (`hostUid`/`guestUid`).
+- Room code entropy increased:
+  - updated `rtc.js` room generator from 4 chars to 10 chars.
+  - alphabet now full uppercase alphanumeric (`A-Z0-9`).
+- Smoke check:
+  - served `index.html`, `rtc.js`, and `firebase.database.rules.json` with HTTP 200.
+  - verified markers for anonymous auth bootstrap, room length `10`, auth wait, and host/guest UID room ownership logic.
+- Manual follow-up required:
+  - publish `firebase.database.rules.json` contents in Firebase Realtime Database Rules console.
+- Follow-up reliability fix for reported `permission-denied` + auth timeout.
+- Updated join code input constraints in `index.html`:
+  - `maxlength` increased from `8` to `12` (supports 10-char room codes and future room length growth).
+  - placeholder updated to an alphanumeric 10-char example.
+- Increased anonymous auth wait timeout in `rtc.js`:
+  - `AUTH_WAIT_TIMEOUT_MS` raised from `12_000` to `60_000`.
+- Adjusted RTDB rules bootstrap reads in `firebase.database.rules.json`:
+  - `hostUid` and `guestUid` now explicitly allow `.read` for authenticated users.
+  - this supports guest bootstrap checks/transaction before full room membership gates apply.
+- Smoke check:
+  - served files confirm updated `maxlength`, timeout constant, and revised rules entries.
+- Multiplayer hardening pass (Firebase Auth + DB rules + room-code alignment) completed:
+  - Updated `firebase.database.rules.json` to authenticated-only + 10-char room key regex (`^[A-Z0-9]{10}$`).
+  - Added strict room field allowlist and unknown-field rejection (`$other: { ".validate": false }`) for room nodes.
+  - Added explicit validation/write rules for `hostUid`, `guestUid`, `offer`, `answer`, `ice-h`, `ice-g`, `connected`, `updatedAt`.
+  - Kept join bootstrap readable (`hostUid` / `guestUid` readable for authenticated users) while signaling remains membership-gated.
+  - Added online auth readiness gating in `game.js`:
+    - new auth session state (`onlineAuthState`, `onlineAuthMessage`)
+    - `bindFirebaseOnlineAuth()` startup wiring
+    - host/join controls and room input disabled until anonymous auth is ready
+    - plain-language status for pending/error auth states
+    - online session start now blocked cleanly when auth is not ready
+  - Unified room-code handling in `game.js` with constants:
+    - `ONLINE_ROOM_CODE_LENGTH = 10`
+    - `ONLINE_ROOM_CODE_REGEX = /^[A-Z0-9]{10}$/`
+    - normalization now slices to 10 chars
+    - start flow now validates exact 10-char code before attempting join/host
+  - Updated online room placeholders to 10-char format (`----------`) in `index.html` + `game.js`.
+- Validation notes:
+  - `firebase.database.rules.json` verified as valid JSON via `python3 -m json.tool`.
+  - Could not run local HTTP smoke in this sandbox (port bind denied: `PermissionError [Errno 1] Operation not permitted`).
+- Follow-up fix for live `permission_denied` on room join/setup:
+  - Root cause: parent-level room write constraints in RTDB rules were too restrictive and could block valid descendant writes during signaling updates.
+  - Updated `firebase.database.rules.json` to remove room-level `.write` gate and enforce permissions at explicit child fields instead.
+  - Kept strict 10-char room key regex and field allowlist; preserved payload validation for offer/answer/ICE.
+  - Added explicit per-field `.read` on signaling nodes so member reads are clear and consistent.
+  - Updated `rtc.js` host close cleanup to delete known child nodes (`offer`, `answer`, `ice-h`, `ice-g`, `connected`, `guestUid`, `hostUid`, `updatedAt`) instead of deleting the full room root path.
+- Validation notes:
+  - Rules JSON parses cleanly (`python3 -m json.tool`).
+  - Firebase Console publish required before client retest.
+- Simplified `guestUid` RTDB rule to transaction-friendly 3-case logic:
+  - host can delete `guestUid`
+  - non-host authenticated user can claim only when empty and only with own uid
+  - current guest can delete own `guestUid`
+- Confirmed `rtc.js joinRoom()` guest transaction already matches target behavior:
+  - `null -> authUser.uid`, `same uid -> keep`, otherwise unchanged.
+- UX recovery update: added explicit `Back to Menu` action for online connection-loss interstitial.
+  - `index.html`: added `#friend-back-menu-btn` in friend interstitial actions.
+  - `game.js`: wired `onFriendBackToMenu()` to close RTC session and return to start menu.
+  - Button is shown/enabled only in `Connection Lost` recovery state and hidden in normal waiting/handoff states.
+- Fixed online startup authority/turn sync race (host vs guest disagreement after connect):
+  - Added explicit host-authoritative `session-init` RTC signal containing role assignments, current turn owner, and full encoded session snapshot.
+  - Host now sends one init payload immediately after transport-ready and local friend match bootstrap.
+  - Guest now applies `session-init` snapshot before determining waiting/active control state.
+  - Added shared `applyOnlineWaitingStateFromCurrentTurn(reason)` resolver so waiting state is derived from `currentPlayer` + local role, not provisional local startup.
+  - Added temporary `[online-init]` debug logs for:
+    - local role / remote role
+    - current turn owner before connect
+    - current turn owner after init
+    - waiting/active transitions and reasons
+  - Added session flags `rtcInitSent` / `rtcInitApplied` and reset points.
+  - Updated incoming turn-code handling to re-derive waiting/active from synced state.
+- Multiplayer polish pass (minimal, no architecture changes):
+  - Added same-browser host detection in `rtc.js joinRoom()`:
+    - if joining `auth.uid` matches room `hostUid`, join now fails with a plain-language testing message (different browser/incognito) instead of surfacing raw Firebase errors.
+  - Added host room-code collision handling in `rtc.js hostRoom()`:
+    - reads `hostUid` first and throws explicit "Room code already in use" when code belongs to another host.
+  - Added host collision retry loop in `game.js startOnlineSession()`:
+    - retries random host code generation up to `ONLINE_HOST_CREATE_MAX_ATTEMPTS` (5).
+    - on repeated collisions, shows friendly message: "Could not create a new online room right now. Please try again."
+  - Added lightweight stale-room strategy comment in `touchRoomUpdatedAt()`:
+    - keep `updatedAt` fresh now; future TODO to prune rooms older than ~30 minutes via best-effort cleanup or periodic prune.
+- Validation notes:
+  - `rg` markers confirm new messages/constants/TODO landed in `rtc.js` and `game.js`.
+  - Runtime Playwright smoke and JS syntax check could not run because `node`/`npx` are unavailable in this environment.
+- JS structure split pass (phase 1, minimal architecture change):
+  - Added new `scoring-rules.js` to hold fixed/incremental yaku rule tables and expose them via `window.HKKScoringRules`.
+  - Added new `state.js` to hold state bootstrap logic (`createState`) and proxy wiring, exposed via `window.HKKStateBootstrap`.
+  - Updated `game.js` to consume the two bootstraps instead of defining scoring tables and state/proxy setup inline.
+  - Updated `index.html` script order to load:
+    - `scoring-rules.js`
+    - `state.js`
+    - `rtc.js`
+    - `game.js`
+- Validation notes:
+  - Static checks confirm bootstrap globals are wired and old inline blocks were removed from `game.js`.
+  - Could not run local browser smoke in this sandbox due port-bind restrictions (`PermissionError: [Errno 1] Operation not permitted`).
+- Online startup sequencing fix (first brand-new online game only):
+  - Added explicit startup invariant helpers in `game.js`:
+    - `enforceInitialOnlineStartupState(reason)` forces `dealer=0`, `currentPlayer=0`, and viewer by role (`host->0`, `guest->1`).
+    - `assertOnlineRoleMapping(reason)` warns if host local index is not 0 or guest local index is not 1.
+    - startup debug payload helpers to log `rtcRole`, `dealer`, `currentPlayer`, `viewerPlayerIndex`, and host/guest index mapping.
+  - Updated `beginOnlineFriendMatch()`:
+    - starts online friend match with forced first-game starter options (`forceDealerPlayerIndex: 0`, `forceCurrentPlayerIndex: 0`).
+    - applies explicit startup state enforcement immediately after local match bootstrap.
+    - host now sends `session-init` then applies waiting-state UI.
+  - Updated `sendHostSessionInitSignal()`:
+    - adds role-mapping assertion/warnings.
+    - warns if session-init would send with non-zero dealer/current.
+    - re-enforces startup invariants before encoding/sending payload.
+    - host init send debug log now includes full startup state + role mapping.
+  - Updated `handleIncomingRtcSignal()` for `session-init`:
+    - after applying host snapshot, explicitly enforces guest startup invariants (including `viewerPlayerIndex=1`).
+    - guest init apply debug log now includes full startup state + role mapping.
+  - Updated `startNewMatch(options)`:
+    - added optional `forceDealerPlayerIndex` and `forceCurrentPlayerIndex` (used only by online startup path).
+- Validation notes:
+  - Static inspection confirms first online startup path now deterministically lands on host P1 active (`dealer=0`, `currentPlayer=0`) before host init send.
+  - Runtime browser verification remains blocked in this sandbox by port bind restrictions.
+- Firebase room lifecycle hardening (free-plan, client-only cleanup):
+  - Added centralized lifecycle constants in `rtc.js`:
+    - `ROOM_TTL_MS = 60 minutes`
+    - `ROOM_ACTIVITY_TOUCH_MIN_MS = 45 seconds` (write-throttle to avoid spam).
+  - Added room lifecycle helpers in `rtc.js`:
+    - `initializeRoomMetadata(db, options)`
+    - `touchRoomActivity(db, options)`
+    - `markRoomConnected(db)`
+    - `isRoomExpired(metadata, nowMs)`
+    - `cleanupExpiredRoomIfNeeded(db, code)`
+    - plus shared metadata reads (`readRoomLifecycleMetadata`) and safe touch wrapper.
+  - Host flow updates:
+    - host create now performs lazy expired-room cleanup before claiming room code.
+    - room metadata (`createdAt`, `lastActiveAt`, `expiresAt`, `connected`) is initialized explicitly.
+    - signaling writes refresh activity timestamps with throttled touches.
+  - Guest flow updates:
+    - guest reads lifecycle metadata before join.
+    - expired room is treated as invalid and lazily cleaned up when possible.
+    - join/signaling path refreshes activity timestamps.
+  - Connection/activity updates:
+    - on data-channel open, room is marked connected + activity refreshed.
+    - keepalive ping/pong and message traffic now trigger throttled activity refresh.
+    - `sendTurnCode` also triggers a safe activity refresh.
+  - Cleanup updates:
+    - host close now removes lifecycle fields (`createdAt`, `lastActiveAt`, `expiresAt`, `updatedAt`) with signaling nodes.
+    - guest close sets `connected=false`, removes `guestUid`, and best-effort touches timestamps.
+  - Replaced RTDB rules with lifecycle-aware rules:
+    - adds metadata field validation (`createdAt`, `lastActiveAt`, `expiresAt`, `connected`).
+    - restricts active signaling reads/writes to non-expired rooms.
+    - keeps authenticated bootstrap reads for host/join/lifecycle checks.
+    - rejects unknown room fields via `$other`.
+    - allows room root deletion for expired rooms (or by members) to support lazy client cleanup.
+- Validation notes:
+  - Rules JSON validates (`python3 -m json.tool`).
+  - Runtime smoke tests remain blocked in this sandbox due local port-bind restrictions.
+- Phase 2 modularization executed: extracted online startup/sync orchestration from `game.js` into `online.js`.
+  - Added new `online.js` with `createOnlineSessionController(deps)` and moved online-session logic into the controller:
+    - role/turn debug helpers
+    - startup invariant helpers
+    - waiting-state resolver
+    - RTC signal encode/decode/send helpers
+    - host `session-init` send flow
+    - round-end sync helper
+    - `beginOnlineFriendMatch()` orchestration
+    - incoming `session-init` / `turn-code` / `round-ready` handling
+  - Updated `index.html` script order to load `online.js` before `game.js`.
+  - Refactored `game.js` online block into thin wrappers delegating to `getOnlineSessionController()`.
+  - Kept external behavior and call sites intact by preserving original function names in `game.js`.
+- Validation notes:
+  - Static checks confirm single definitions for extracted online functions now delegate to controller methods.
+  - Runtime browser verification still blocked in this sandbox (port bind restriction).
+- Phase 3 modularization executed: extracted online start/auth/room UI flow from `game.js` into `online-start.js`.
+  - Added new `online-start.js` with `createOnlineStartController(deps)` and moved these concerns into a dedicated controller:
+    - Firebase anonymous-auth readiness + timeout UI handling
+    - room-code normalization and collision helper
+    - start-menu online panel mode/display/status management
+    - host/join startup handlers and room create/join retry flow
+    - RTC badge rendering
+    - incoming RTC raw payload routing (`session signal` vs `turn code`)
+  - Updated `index.html` script order to load `online-start.js` before `game.js`.
+  - Refactored `game.js` online-start functions into wrappers via `getOnlineStartController()` to preserve existing call sites.
+- Validation notes:
+  - Static `rg` checks confirm online-start functions now have a single implementation in `online-start.js` and wrapper delegates in `game.js`.
+  - Runtime smoke tests remain blocked in this sandbox due local port-bind restrictions and missing Node/Playwright runtime.
+- Phase 4 modularization executed: extracted RTC runtime/session lifecycle plumbing from `game.js` into `online-runtime.js`.
+  - Added new `online-runtime.js` with `createOnlineRuntimeController(deps)` and moved:
+    - `bindRtcBridge()` status subscription + interstitial status forwarding
+    - `resetRtcSession()` connection teardown/session reset
+    - `triggerRtcHeartbeatPulse()` heartbeat pulse timer behavior
+  - Updated `index.html` to load `online-runtime.js` before `game.js`.
+  - Refactored `game.js` runtime functions into wrappers via `getOnlineRuntimeController()`.
+- Validation notes:
+  - Static checks confirm extracted runtime functions now live in `online-runtime.js` with wrapper delegates in `game.js`.
+  - Runtime smoke test still blocked in this sandbox (no local port bind and no Node runtime).
+- Phase 5 modularization executed: extracted friend handoff/interstitial flow from `game.js` into `online-handoff.js`.
+  - Added new `online-handoff.js` with `createOnlineHandoffController(deps)` and moved:
+    - interstitial status/open-state handlers
+    - friend interstitial load/copy/continue/back actions
+    - turn handoff preparation + online send dispatch
+  - Updated `index.html` to load `online-handoff.js` before `game.js`.
+  - Refactored corresponding `game.js` functions into wrappers via `getOnlineHandoffController()`.
+- Validation notes:
+  - Static checks confirm extracted friend handoff functions now live in `online-handoff.js` with wrapper delegates in `game.js`.
+  - Runtime smoke test remains blocked in this sandbox (local port bind restricted; Node/Playwright unavailable).
+- Phase 6 modularization executed: extracted clipboard/manual load helpers from `game.js` into `code-io.js`.
+  - Added new `code-io.js` with `createCodeIoController(deps)` and moved:
+    - `readClipboardTextSafe()`
+    - `tryLoadFromClipboardOrManual(target)`
+    - `onStartLoadFromMenu()`
+  - Updated `index.html` to load `code-io.js` before `game.js`.
+  - Refactored corresponding `game.js` functions into wrappers via `getCodeIoController()`.
+- Validation notes:
+  - Static checks confirm code-load helper functions now live in `code-io.js` with wrapper delegates in `game.js`.
+  - Runtime smoke test remains blocked in this sandbox (local port bind restricted; Node/Playwright unavailable).
+- Phase 1a implementation started from firebase-relay-v3.5 design:
+  - Rewrote `rtc.js` transport from WebRTC to Firebase RTDB relay (`rooms/{roomCode}/messages/{pushId}`), preserving bridge API names:
+    - `hostRoom`, `joinRoom`, `sendTurnCode`, `closeRoom`, `createRoomCode`, `getStatus`, `onStatusChange`, `onHeartbeat`
+    - added `removeRoom(roomCode)` for re-host cleanup path.
+  - Added internal ping/pong keepalive over RTDB messages with no forwarding to `onReceive`.
+  - Kept room lifecycle helpers and constants (`ROOM_TTL_MS`, `ROOM_ACTIVITY_TOUCH_MIN_MS`, `initializeRoomMetadata`, `touchRoomActivity`, `markRoomConnected`, `isRoomExpired`, `cleanupExpiredRoomIfNeeded`, `readRoomLifecycleMetadata`).
+  - Updated `online-start.js`:
+    - host button guard during async room creation (disable + loading label + re-enable in finally)
+    - best-effort re-host room cleanup via `rtc.removeRoom(previousRoomCode)`
+    - status text changed from `Finalizing peer connection...` to `Waiting for opponent...`
+  - Replaced Firebase rules file contents to add:
+    - `rooms/{roomCode}/messages` validation and membership-gated read/write
+    - `rateLimits/roomCreation/{uid}` node for 30s host creation throttling enforcement
+    - removal of obsolete offer/answer/ice signaling branches.
+- Validation notes:
+  - `firebase.database.rules.json` passes JSON parse (`python3 -m json.tool`).
+  - static grep confirms `rtc.js` no longer contains WebRTC APIs (`RTCPeerConnection`, SDP/ICE calls).
+  - runtime browser tests remain blocked in this sandbox due local port-bind + missing Node/Playwright.
+- Phase 1b implementation executed (payload trimming):
+  - Updated `online.js`:
+    - added `encodeStateForOnline()` inside `createOnlineSessionController`.
+    - implementation decodes full code payload, removes online-transient fields (`actionLog`, `drawPile`, `drawPreview`, `message`, `lastTurnRecap`, `aiProfile`, `cpuPhase1PreviewCardId`, `aiPreview`, `awaitingDeckFlip`), and re-encodes with same prefix/checksum format.
+    - routed `sendHostSessionInitSignal()` and `syncOnlineRoundTransitionSnapshot()` through `encodeStateForOnline()`.
+    - online receive imports now pass `{ allowMissingDrawPile: true }`.
+  - Updated `online-handoff.js`:
+    - `dispatchFriendTurnHandoff()` now sends `encodeStateForOnline()` instead of full `encodeStateToCode()`.
+    - retained full-code usage for manual copy-link path (`onFriendInterstitialCopyCode`) to preserve save/fallback behavior.
+  - Updated `online-start.js`:
+    - raw online payload import path now passes `{ allowMissingDrawPile: true }`.
+  - Updated `game.js` validator/import path:
+    - `loadCodeIntoGame()` accepts `allowMissingDrawPile` option and forwards it.
+    - `decodeGameCode()` and `validateSnapshot()` now accept options.
+    - `validateSnapshot()` allows missing `drawPile` only when `allowMissingDrawPile` is true.
+    - `applySnapshot()` accepts options and reconstructs `state.drawPile` from prior local order when online payload omits drawPile.
+    - added `rebuildDrawPileFromPriorIds(...)` helper for the reconstruction.
+    - added `encodeStateForOnline()` wrapper and passed it into online handoff controller deps.
+- Validation notes:
+  - Static grep confirms all three online send paths now use online-encoded payloads:
+    - host session init (`online.js`)
+    - round transition sync (`online.js`)
+    - turn handoff dispatch (`online-handoff.js`)
+  - `allowMissingDrawPile` flag is only used by online import call sites (`online.js`, `online-start.js`), not save/friend manual load paths.
+  - Runtime browser tests remain blocked in this sandbox (local port bind restricted; Node/Playwright unavailable).
+- Phase 2-A implementation started (snapshot writes only, no rejoin/presence/abandon/UI persistence):
+  - `rtc.js`:
+    - added `writeSnapshot(stateString, turnIndex)` (best-effort, logs and returns false on failure, no throw).
+    - added `readSnapshot()` returning `{ state, turnIndex } | null`.
+    - updated `closeRoom()` cleanup to remove `rooms/{roomCode}/messages` and mark room not-connected while preserving `snapshot` data.
+    - added host-side precheck for `rateLimits/roomCreation/{uid}` with friendly wait error (avoids raw `Set hostUid: PERMISSION_DENIED` when creating too fast).
+  - `online.js`:
+    - added `getOnlineSnapshotTurnIndex()`.
+    - added `sendOnlineTurnCodeWithSnapshot(stateCode, wirePayload, options)` helper that writes snapshot first, then sends turn payload only on snapshot-write success.
+    - updated `syncOnlineRoundTransitionSnapshot()` to route through snapshot-first send path.
+  - `online-handoff.js`:
+    - updated `dispatchFriendTurnHandoff()` to use snapshot-first send helper (`save snapshot` -> `send`), with friendly status text on snapshot or send failure.
+  - `game.js`:
+    - passed `sendOnlineTurnCodeWithSnapshot` into online handoff controller deps.
+    - added wrapper function delegating to online session controller.
+  - `firebase.database.rules.json`:
+    - added `rooms/{roomCode}/snapshot` node rules for authenticated room members on non-expired rooms.
+    - validates snapshot shape: `state` (string <= 16000), `turnIndex` (number >= 0), `updatedAt` (number), rejects unknown fields.
+- Validation notes:
+  - Rules JSON parses cleanly via `python3 -m json.tool`.
+  - Runtime browser verification not run in this sandbox (no browser/Playwright run in this pass).
+- Next phase candidate: Step 2-B (rejoin + URL/localStorage persistence + 30-day TTL) after Step 2-A browser tests pass.
+- Step 2-A adjustment:
+  - `sendHostSessionInitSignal()` now also uses snapshot-first send (`writeSnapshot` before wire send) so all online state-bearing sends gate on snapshot persistence.
+- Phase 2-B implementation executed (rejoin + persistence layer, no presence/abandon/reconnect-overlay):
+  - `rtc.js`:
+    - `ROOM_TTL_MS` increased to `2_592_000_000` (30 days).
+    - added `rejoinRoom(roomCode, role, onReceive)`:
+      - validates room + role
+      - verifies role ownership against `hostUid/guestUid`
+      - rejects expired rooms
+      - clears `rooms/{roomCode}/messages`
+      - re-subscribes relay listeners and keepalive
+      - marks session connected and returns `readSnapshot()` payload (`{ state, turnIndex } | null`).
+    - exposed `readRoomLifecycleMetadata(roomCode)` on `window.rtcBridge` (auth-aware).
+  - `online.js`:
+    - added `handleOnlineReconnect(roomCode, role)`:
+      - sets role/room session state
+      - calls `rtc.rejoinRoom(..., onRtcReceiveTurnCode)`
+      - if snapshot exists, imports friend state with `{ allowNonCheckpointFriendImport: true, allowMissingDrawPile: true }` and reapplies waiting-state.
+      - if snapshot missing, sets `rtcPendingStart=true` and triggers normal init flow.
+    - `beginOnlineFriendMatch()` now persists room+role to localStorage and URL on successful online session start.
+  - `game.js`:
+    - added online session persistence helpers:
+      - `persistOnlineSessionContext(roomCode, role)`
+      - `clearOnlineSessionContext()`
+      - `readOnlineSessionContextFromUrl()`
+      - `readOnlineSessionContextFromStorage()`
+    - init flow now attempts auto-rejoin before showing start menu:
+      - `attemptOnlineResumeOnLoad()` called after assets preload
+      - if rejoin succeeds, user bypasses start menu
+      - if not, normal start menu shows (with optional notice).
+    - added wrappers/dependency wiring for `handleOnlineReconnect` + `attemptOnlineResumeOnLoad` across controllers.
+    - on match completion (`applyFinalMessage`), online room/role URL+storage context is cleared.
+  - `online-start.js`:
+    - added `attemptOnlineResumeOnLoad()`:
+      - tries URL `?room=&role=` reconnect first
+      - on reconnect failure shows friendly notice (`This game has expired.` for expired/not-found)
+      - fallback storage check uses `rtc.readRoomLifecycleMetadata()`; clears stale storage if expired.
+  - `online-runtime.js`:
+    - `resetRtcSession({ closeConnection: true })` now clears stored online room/role URL context.
+- Validation notes:
+  - `firebase.database.rules.json` still parses cleanly.
+  - Runtime browser tests were not executed in this sandbox (no Node/Playwright runtime here).
+- Next phase candidate: Step 2-C (presence + reconnect overlay) after Step 2-B browser tests pass.
+- Phase 2-C implementation executed (presence + reconnect behavior, no abandon flow):
+  - `rtc.js`:
+    - added presence writes on connect/rejoin (`rooms/{roomCode}/presence/{role} = true`).
+    - registers `onDisconnect().remove()` for presence.
+    - `closeRoom()` cleanup now removes own presence role node.
+  - `firebase.database.rules.json`:
+    - added `rooms/{roomCode}/presence` rules.
+    - read/write limited to authenticated room members on non-expired rooms.
+    - role-scoped write checks (`host` uid can write host presence, `guest` uid can write guest presence).
+    - value validation: `true` or delete only.
+  - `online.js`:
+    - added remote presence subscription + tracking (`rtcRemotePresence`, missing-since timer, 5-min timeout message).
+    - waiting status now updates to opponent connected/disconnected/reconnected states.
+    - added `handleRtcDisconnectAutoReconnect()`:
+      - on disconnect/error in active online session, opens reconnect state
+      - auto-attempts `handleOnlineReconnect(...)`
+      - 30s timeout path sets reconnect-failed state
+      - success path reapplies waiting/active state and posts `Reconnected.`
+    - added `clearOnlineRealtimeSubscriptions()` for reset/session teardown.
+    - adjusted reconnect failure handling to preserve role/room for retry attempts.
+  - `online-runtime.js`:
+    - on rtc `disconnected`/`error` during active session (non-startup), triggers auto reconnect attempt.
+    - reset now clears realtime presence subscriptions + reconnect flags.
+  - `online-handoff.js`:
+    - `Load` button behavior in reconnect-failed mode now acts as `Try Again` (retry reconnect).
+  - `game.js` + `state.js`:
+    - added runtime session state fields for reconnect/presence tracking.
+    - interstitial rendering updated:
+      - recovery state shows reconnecting / could-not-reconnect variants
+      - failed reconnect shows `Try Again` + `Return to Menu`
+      - waiting state reflects remote presence (`Waiting for opponent to reconnect`)
+      - after 5-min remote absence, button label shifts to `Leave Game` placeholder.
+- Validation notes:
+  - rules JSON parses cleanly via `python3 -m json.tool`.
+  - runtime/browser verification not run in this sandbox (no Node/Playwright runtime in this environment).
+- Next phase candidate: Step 2-D (abandon flow).
+- Phase 2-D implementation executed (explicit abandon flow + menu exit UX):
+  - `rtc.js`:
+    - added room metadata reads for `abandoned` and `abandonedBy`.
+    - host room setup now clears stale `abandoned` / `abandonedBy`.
+    - join/rejoin now fail cleanly for rooms marked abandoned.
+    - added `writeAbandoned(role)` to bridge API; writes `{ abandoned: true, abandonedBy, connected: false }` and refreshes activity timestamps.
+  - `online.js`:
+    - added room-level abandonment subscriptions (`rooms/{roomCode}/abandoned`, `abandonedBy`).
+    - when remote role abandons, sets `rtcOpponentAbandoned`, opens interstitial, and shows return-to-menu guidance.
+    - reconnect path now short-circuits when session is explicitly abandoned.
+    - realtime cleanup now unsubscribes abandonment listeners and clears abandon flags.
+  - `online-runtime.js`:
+    - status handler no longer starts reconnect loop if opponent-abandoned state is active.
+    - reset path clears `rtcOpponentAbandoned` + `rtcOpponentAbandonedBy`.
+  - `online-handoff.js`:
+    - `onFriendBackToMenu()` now asks for confirmation in online sessions and best-effort writes abandon marker before closing room/resetting session.
+  - `index.html` + `game.js`:
+    - added top-bar `Leave Online` button for active online sessions.
+    - wired button to existing back-to-menu flow.
+    - interstitial now renders explicit `Opponent Left` state with `Return to Menu`.
+  - `state.js`:
+    - added session field `rtcOpponentAbandonedBy`.
+  - `firebase.database.rules.json`:
+    - added validated room fields:
+      - `abandoned` (members can set true on active room; host can clear on reset)
+      - `abandonedBy` (`host|guest`; host can clear on reset)
+- Validation notes:
+  - `firebase.database.rules.json` parses cleanly via `python3 -m json.tool`.
+  - Runtime browser verification not executed in this sandbox (Node/Playwright unavailable here).
+- Phase 2-E implementation executed (async UX polish, UI-focused):
+  - `index.html`:
+    - added start-menu inline expired-room note (`start-expired-note`) with dismiss button.
+    - added start-menu resume card (`start-resume-card`) with `Resume` + `Leave Game` actions.
+    - added online-panel bookmark prompt (`online-bookmark-prompt`) with `Copy URL` + dismiss.
+    - added persistent in-game room chip button (`online-room-chip`) for quick room code copy.
+  - `style.css`:
+    - added styles for expired note, resume card, bookmark prompt, and room chip.
+  - `online-start.js`:
+    - added resume-card state/rendering based on localStorage room metadata (`roomCode`, `role`, `lastActiveAt`).
+    - app-load flow now populates/clears resume candidate based on room lifecycle (`expiresAt`, `abandoned`).
+    - URL-based expired room now uses dismissible inline note (`This game has expired.`) instead of modal flow.
+    - added resume-card actions:
+      - `Resume` attempts `handleOnlineReconnect(...)` with retry state (`Try Again`) on failure.
+      - `Leave Game` confirms and best-effort writes abandon metadata, then clears local context.
+    - after host/join success, now persists `?room=&role=` URL immediately and shows bookmark prompt.
+    - bookmark prompt includes `Copy URL` with temporary `Copied!` feedback and dismiss action.
+  - `game.js`:
+    - wired new start-menu/bookmark/room-chip DOM nodes and click handlers.
+    - added `refreshStartMenuAsyncUx()` wrapper call from `showStartMenu()`.
+    - added `renderDocumentTitleAndOnlineRoomChip()` in render loop:
+      - online active + local turn: `Your turn - Koi-Koi`
+      - online active + waiting: `Waiting - Koi-Koi`
+      - otherwise: `Koi-Koi`
+    - room chip now displays `Room {code} | Copy` during active online session.
+    - online interstitial UI removed online copy-paste controls in waiting/recovery paths (kept reconnect/return actions).
+    - `isFriendCodeMode()` now excludes active online sessions so turn-link code panel mode remains friend-local only.
+    - updated online-only status copy to avoid manual turn-link fallback messaging.
+  - `online.js`, `online-handoff.js`, `online-start.js`, `game.js`:
+    - text polish pass removed online-specific "share turn link fallback" guidance from failure messaging.
+- Validation notes:
+  - Rules JSON still parses (`python3 -m json.tool firebase.database.rules.json`).
+  - Runtime browser tests not executed in this sandbox (Node/Playwright unavailable).
+- Round-transition ready gating fix:
+  - Symptom: after round end, only one online player could act while the other remained in waiting interstitial.
+  - Root cause: `applyOnlineWaitingStateFromCurrentTurn(...)` always derived waiting from `currentPlayer`, even during round-transition ack phase.
+  - Fix:
+    - `online.js`: short-circuit waiting logic when `roundTransition.open && roundOver && !matchOver` so both clients exit waiting state and can press Ready.
+    - `game.js`: after opening round transition in both `endRoundDraw()` and `endRoundWithWinner()`, force waiting-state refresh via `applyOnlineWaitingStateFromCurrentTurn("round-transition-local")`.
+- Phase 2A foundation modularization pass completed for F-9/F-5/F-6/F-13.
+- Added modules: `utils.js`, `snapshot-codec.js`, `ai.js`, `saves.js` and loaded them before dependent runtime scripts in `index.html`.
+- `computeCodeChecksum` logic is now canonical in `window.HKKUtils` and used by game/online paths.
+- Snapshot code responsibilities moved to `window.HKKSnapshotCodec.createSnapshotCodec(deps)` with `game.js` thin wrappers preserved for callsite stability.
+- AI profiles + decision/runtime scheduling moved to `window.HKKAI.createAIController(deps)` with `game.js` thin wrappers preserved.
+- Added SavedMatch schema typedef and async save API contracts in `window.HKKSaves`; methods validate inputs and intentionally throw not-implemented for Phase 2A.
+- Validation limits: Node/Playwright unavailable in this environment (`node`/`npx` not found), so verification was static inspection/grep only.
+- Phase 2B storage backend implemented in `saves.js`.
+- `window.HKKSaves` now uses a real localStorage store (`hkk_saved_matches_v1`) with a versioned envelope `{ version, matches }`.
+- Added defensive read/write helpers and malformed-data handling: bad JSON/envelope/records are safely ignored or dropped without crashing startup paths.
+- Added SavedMatch normalization + validation before write/read exposure; API methods remain Promise-based (`saveMatch`, `loadMatch`, `listMatches`, `deleteMatch`).
+- `saveMatch` now upserts by `id` and uses write-time `updatedAt = Date.now()`; `listMatches()` sorts by `updatedAt` descending, then `id` ascending.
+- No UI wiring, autosave hooks, Current Games screen, online/server listing, or gameplay flow changes were added in this pass.
+- Phase 2C CPU autosave/resume wiring implemented on top of `HKKSaves` + snapshot-codec path.
+- Added conservative CPU autosave checkpoints in `game.js` (turn completion, round start/transition, start-menu explicit exit path) with transient-state gating (`pendingSelection`, draw flip, decision, AI preview, replay).
+- Added startup CPU resume attempt from device save slots: scans latest unfinished CPU saves, hydrates via `decodeGameCode` + `applySnapshot`, and skips/deletes malformed entries safely.
+- CPU save metadata now built from live state (`mode=cpu`, title/playerNames, round, scoreSnapshot, turnOwner, status, finished, gameSnapshot).
+- Finished CPU matches now clear their active autosave slot so they do not behave like resumable active games by default.
+- Scope held: no Local Multiplayer autosave wiring, no Current Games UI, no online/server save listing, no invite/Firebase/code-flow redesign.
+- Validation limits: Node/Playwright unavailable (`node`/`npx` not found), so verification here was static inspection + HTTP smoke.
+- Corrective Phase 2C patch: fixed CPU resume normalization draw-card orphan risk.
+- `normalizeCpuResumeStateForSafety()` now re-homes orphan draw-phase cards to field before clearing transients (`awaitingDeckFlip.drawnCard`, draw-phase `pendingSelection.drawnCard`) with duplicate-avoidance checks across stable zones.
+- Added small guard in `showStartMenu()` to avoid unnecessary startup call path for CPU autosave unless a CPU match is actually active.
+- Phase 2D implemented: Local Multiplayer autosave/resume on unified `HKKSaves` store.
+- Added Local save metadata + lifecycle in `game.js` (`mode=local`, `title=Local Match`, player names, round/score/turn/status/finished, `gameSnapshot`).
+- Added conservative Local autosave safety gate + checkpoints: turn complete/handoff-safe, round start, round transitions, and explicit return-to-menu paths.
+- Added Local resume callbacks for start-menu resume card: load from `SavedMatch.gameSnapshot` via `decodeGameCode` + `applySnapshot`, normalize transient state safely, enforce pass-device interstitial posture, then persist normalized state.
+- Added temporary resume-card fallback in `online-start.js`: online resume takes precedence; Local resume card appears only when a resumable Local save exists.
+- Added Local save delete path from temporary resume card, plus finished-match cleanup behavior to avoid treating completed matches as active resumable slots.
+- Scope held: no Current Games UI, no online/server save listing, no invite/Firebase redesign, no replay/recap redesign.
+- Validation limits: no Node/Playwright in this environment; verification was static inspection + local HTTP smoke.
+- Phase 2E device-only Current Games shell implemented.
+- Added start-menu `Current Games` entry point and a device-only panel listing CPU + Local saved matches from `HKKSaves`.
+- Current Games cards now show: mode chip, title + player names, round/month, score summary, status, and relative updated time.
+- Resume flow from Current Games now hydrates directly from `SavedMatch.gameSnapshot` via existing resume paths (`resumeCpuMatchFromSavedMatch`, `resumeLocalMatchFromSavedMatch`).
+- Listing order for Current Games is now deterministic: unfinished first, then most recently updated first (`updatedAt desc`, `id` tie-break).
+- Folded temporary one-off resume behavior into Current Games:
+  - removed Local fallback resume-card wiring from `online-start.js`.
+  - removed CPU startup auto-resume; startup now stays in menu until explicit user action.
+- Scope held: no online/server Current Games cards, no Current Games redesign beyond transitional shell, no invite/Firebase/code-flow/replay/recap redesign.
+- Validation notes:
+  - `node --check` passed for `game.js`, `online-start.js`, and `saves.js`.
+  - Playwright client run was attempted via `develop-web-game` skill script, but failed because `playwright` package is not installed in this environment (`ERR_MODULE_NOT_FOUND`).

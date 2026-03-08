@@ -763,11 +763,12 @@
     setStatus("idle");
   }
 
-  async function writeAbandoned(nextRole = role) {
+  async function writeAbandoned(nextRole = role, roomCodeOverride = "") {
     const db = getDbOrThrow();
     await waitForAuthUser();
     const normalizedRole = nextRole === "host" || nextRole === "guest" ? nextRole : role;
-    if (!roomCode || !normalizedRole) return false;
+    const targetRoomCode = normalizeRoomCode(roomCodeOverride || roomCode);
+    if (!targetRoomCode || !normalizedRole) return false;
     const nowMs = Date.now();
     const payload = {
       abandoned: true,
@@ -776,8 +777,10 @@
       ...buildRoomActivityUpdate(nowMs),
     };
     try {
-      await db.ref(`rooms/${roomCode}`).update(payload);
-      lastRoomActivityTouchAt = nowMs;
+      await db.ref(`rooms/${targetRoomCode}`).update(payload);
+      if (targetRoomCode === roomCode) {
+        lastRoomActivityTouchAt = nowMs;
+      }
       return true;
     } catch (err) {
       console.warn("rtc writeAbandoned failed", err);
@@ -786,9 +789,15 @@
   }
 
   function createRoomCode() {
+    const cryptoApi = window.crypto || globalThis.crypto;
+    if (!cryptoApi?.getRandomValues) {
+      throw new Error("Secure random source unavailable");
+    }
+    const bytes = new Uint8Array(ROOM_LENGTH);
+    cryptoApi.getRandomValues(bytes);
     let next = "";
     for (let i = 0; i < ROOM_LENGTH; i += 1) {
-      next += ROOM_ALPHABET[Math.floor(Math.random() * ROOM_ALPHABET.length)];
+      next += ROOM_ALPHABET[bytes[i] % ROOM_ALPHABET.length];
     }
     return next;
   }
