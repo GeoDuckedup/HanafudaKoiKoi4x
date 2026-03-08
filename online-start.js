@@ -338,8 +338,10 @@
           ? state.rtcStatus
           : "idle";
       const roleText = state.rtcRole === "host" ? "Host" : state.rtcRole === "guest" ? "Guest" : "Online";
-      const statusText =
-        normalizedStatus === "connected"
+      const remoteMissing = normalizedStatus === "connected" && state.rtcRemotePresence === false;
+      const statusText = remoteMissing
+        ? "Opponent offline"
+        : normalizedStatus === "connected"
           ? "Connected"
           : normalizedStatus === "connecting"
             ? "Connecting"
@@ -351,7 +353,7 @@
       const roomText = state.rtcRoomCode ? ` (${state.rtcRoomCode})` : "";
       ui.rtcStatusText.textContent = `${roleText}: ${statusText}${roomText}`;
       ui.rtcStatusBadge.classList.remove("is-idle", "is-connecting", "is-connected", "is-disconnected", "is-error");
-      ui.rtcStatusBadge.classList.add(`is-${normalizedStatus}`);
+      ui.rtcStatusBadge.classList.add(`is-${remoteMissing ? "disconnected" : normalizedStatus}`);
       ui.rtcStatusBadge.classList.toggle("pulse", Boolean(state.rtcHeartbeatPulse));
     }
 
@@ -368,6 +370,7 @@
             notice: getInviteFailureMessage("invalid"),
             noticeIsError: true,
             openOnlinePanel: true,
+            openOnlineLoad: false,
           };
         }
         if (fromUrl.source === "legacy" && typeof normalizeLegacyOnlineUrlToInvite === "function") {
@@ -381,6 +384,7 @@
             notice: "Online mode unavailable: RTC bridge not loaded.",
             noticeIsError: true,
             openOnlinePanel: true,
+            openOnlineLoad: false,
           };
         }
 
@@ -412,12 +416,16 @@
             if (typeof persistOnlineSessionContext === "function") {
               persistOnlineSessionContext(inviteRoomCode, selfRole);
             }
+            if (typeof rtc.syncOwnRoomSummary === "function") {
+              rtc.syncOwnRoomSummary(inviteRoomCode, selfRole).catch(() => {});
+            }
           }
           return {
             resumed: false,
             notice: getInviteFailureMessage("already-joined"),
             noticeIsError: false,
             openOnlinePanel: false,
+            openOnlineLoad: true,
           };
         }
         if (inviteFailure) {
@@ -426,6 +434,7 @@
             notice: getInviteFailureMessage(inviteFailure),
             noticeIsError: true,
             openOnlinePanel: true,
+            openOnlineLoad: false,
           };
         }
 
@@ -434,17 +443,18 @@
           source: "invite-link",
         });
         if (joined) {
-          return { resumed: true, notice: "", noticeIsError: false, openOnlinePanel: false };
+          return { resumed: true, notice: "", noticeIsError: false, openOnlinePanel: false, openOnlineLoad: false };
         }
         return {
           resumed: false,
           notice: ui.startOnlineStatus?.textContent || "Could not join that invite.",
           noticeIsError: true,
           openOnlinePanel: true,
+          openOnlineLoad: false,
         };
       }
 
-      return { resumed: false, notice: "", noticeIsError: false, openOnlinePanel: false };
+      return { resumed: false, notice: "", noticeIsError: false, openOnlinePanel: false, openOnlineLoad: false };
     }
 
     async function onStartModeOnlineFromMenu() {

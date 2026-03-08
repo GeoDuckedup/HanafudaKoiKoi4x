@@ -12,6 +12,9 @@ Current defaults (runtime):
   - Standardized waiting-state wording (`CPU turn`, `Waiting on opponent`) and added consistent waiting/finished status styling.
   - Online load list is now server-first; legacy local online context fallback is demoted to transition-only when no server entries exist.
   - Mode-aware card action labels now read `Leave` for online and `Delete` for device saves.
+- Phase 4B follow-up stabilization:
+  - Fixed false `Expired / unavailable` online load cards caused by trusting `roomIndex.joinState` even when the roomIndex read was missing/unavailable.
+  - RTC status badge now shows `Opponent offline` (and warning color) when local connection is up but remote presence is false.
 
 - Removed all `assets/manual` sheet paths from `SHEET_PATHS`.
 - Removed legacy `SPRITE_LAYOUT` manual fallback mapping.

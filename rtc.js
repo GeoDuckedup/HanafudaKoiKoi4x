@@ -10,6 +10,7 @@
   const RTC_SIGNAL_PREFIX = "HKKSIG1.";
   const MAX_MESSAGE_PAYLOAD_LENGTH = 16_000;
   const ROOM_INDEX_VERSION = 1;
+  const USER_ROOM_SUMMARY_VERSION = 1;
 
   let role = null;
   let roomCode = "";
@@ -133,6 +134,40 @@
     };
   }
 
+  function normalizeJoinState(rawState) {
+    const state = String(rawState || "").trim().toLowerCase();
+    if (state === "open" || state === "full" || state === "expired" || state === "closed") {
+      return state;
+    }
+    return "expired";
+  }
+
+  function buildUserRoomSummaryPayload(roomCodeValue, roleValue, metadata, roomIndex, nowMs = Date.now()) {
+    const normalizedRoomCode = normalizeRoomCode(roomCodeValue);
+    const normalizedRole = roleValue === "host" || roleValue === "guest" ? roleValue : "";
+    if (!normalizedRoomCode || !normalizedRole) return null;
+    const computedJoinState = computeRoomJoinState(metadata, nowMs);
+    const roomIndexJoinState =
+      roomIndex && roomIndex.exists === true ? normalizeJoinState(roomIndex.joinState || "") : "";
+    const summaryJoinState = roomIndexJoinState || computedJoinState;
+    const roomIndexExpiresAt =
+      roomIndex && roomIndex.exists === true ? Number(roomIndex.expiresAt || 0) : 0;
+    const expiresAtValue = Number(roomIndexExpiresAt || metadata?.expiresAt || 0);
+    const lastActiveAtValue = Number(metadata?.lastActiveAt || metadata?.updatedAt || roomIndex?.updatedAt || nowMs);
+    const roomIndexUpdatedAt =
+      roomIndex && roomIndex.exists === true ? Number(roomIndex.updatedAt || 0) : 0;
+    const updatedAtValue = Number(roomIndexUpdatedAt || metadata?.updatedAt || metadata?.lastActiveAt || nowMs);
+    return {
+      version: USER_ROOM_SUMMARY_VERSION,
+      roomCode: normalizedRoomCode,
+      role: normalizedRole,
+      joinState: summaryJoinState,
+      expiresAt: Number.isFinite(expiresAtValue) && expiresAtValue > 0 ? Math.floor(expiresAtValue) : 0,
+      lastActiveAt: Number.isFinite(lastActiveAtValue) && lastActiveAtValue > 0 ? Math.floor(lastActiveAtValue) : nowMs,
+      updatedAt: Number.isFinite(updatedAtValue) && updatedAtValue > 0 ? Math.floor(updatedAtValue) : nowMs,
+    };
+  }
+
   async function readRoomIndexInternal(db, code) {
     const targetCode = normalizeRoomCode(code);
     if (!targetCode) {
@@ -193,6 +228,61 @@
       return true;
     } catch (err) {
       console.warn("rtc roomIndex sync failed", { roomCode: targetCode, err });
+      return false;
+    }
+  }
+
+  async function upsertOwnUserRoomSummary(db, authUserUid, code, roleValue) {
+    const targetCode = normalizeRoomCode(code);
+    const normalizedRole = roleValue === "host" || roleValue === "guest" ? roleValue : "";
+    const normalizedUid = String(authUserUid || "").trim();
+    if (!targetCode || !normalizedRole || !normalizedUid) return false;
+    try {
+      const [metadata, roomIndex] = await Promise.all([
+        readRoomLifecycleMetadataInternal(db, targetCode),
+        readRoomIndexInternal(db, targetCode),
+      ]);
+      const payload = buildUserRoomSummaryPayload(targetCode, normalizedRole, metadata, roomIndex, Date.now());
+      if (!payload) return false;
+      await db.ref(`userRooms/${normalizedUid}/${targetCode}`).set(payload);
+      return true;
+    } catch (err) {
+      console.warn("rtc userRooms summary upsert failed", { roomCode: targetCode, role: normalizedRole, err });
+      return false;
+    }
+  }
+
+  function touchOwnUserRoomSummaryActivity(db, authUserUid, code, roleValue, nowMs = Date.now()) {
+    const targetCode = normalizeRoomCode(code);
+    const normalizedRole = roleValue === "host" || roleValue === "guest" ? roleValue : "";
+    const normalizedUid = String(authUserUid || "").trim();
+    if (!targetCode || !normalizedRole || !normalizedUid) return Promise.resolve(false);
+    return db
+      .ref(`userRooms/${normalizedUid}/${targetCode}`)
+      .update({
+        version: USER_ROOM_SUMMARY_VERSION,
+        roomCode: targetCode,
+        role: normalizedRole,
+        expiresAt: nowMs + ROOM_TTL_MS,
+        lastActiveAt: nowMs,
+        updatedAt: nowMs,
+      })
+      .then(() => true)
+      .catch((err) => {
+        console.warn("rtc userRooms summary activity touch failed", { roomCode: targetCode, err });
+        return false;
+      });
+  }
+
+  async function removeOwnUserRoomSummary(db, authUserUid, code) {
+    const targetCode = normalizeRoomCode(code);
+    const normalizedUid = String(authUserUid || "").trim();
+    if (!targetCode || !normalizedUid) return false;
+    try {
+      await db.ref(`userRooms/${normalizedUid}/${targetCode}`).remove();
+      return true;
+    } catch (err) {
+      console.warn("rtc userRooms summary remove failed", { roomCode: targetCode, err });
       return false;
     }
   }
@@ -305,7 +395,14 @@
     return db
       .ref(`rooms/${roomCode}`)
       .update(buildRoomActivityUpdate(nowMs))
-      .then(() => touchRoomIndexActivity(db, roomCode, nowMs))
+      .then(() => {
+        const authUid = String(window._firebaseAuth?.currentUser?.uid || "").trim();
+        const activeRole = role === "host" || role === "guest" ? role : "";
+        return Promise.all([
+          touchRoomIndexActivity(db, roomCode, nowMs),
+          touchOwnUserRoomSummaryActivity(db, authUid, roomCode, activeRole, nowMs),
+        ]).then(() => true);
+      })
       .catch((err) => {
         console.warn("rtc room activity touch failed", err);
         return false;
@@ -628,6 +725,7 @@
       await withDbStep("Set connected false", () => db.ref(roomPath("connected")).set(false));
       await withDbStep("Refresh room activity", () => touchRoomActivity(db, { force: true }));
       await withDbStep("Sync room index", () => syncRoomIndexFromLifecycle(db, normalized));
+      await withDbStep("Sync host user room summary", () => upsertOwnUserRoomSummary(db, authUser.uid, normalized, "host"));
       await withDbStep("Set host presence", () => setupPresence(db));
       await withDbStep("Write room creation rate limit", () => {
         const serverTimestamp = window.firebase?.database?.ServerValue?.TIMESTAMP ?? Date.now();
@@ -640,6 +738,7 @@
       return true;
     } catch (err) {
       console.warn("rtc hostRoom failed", err);
+      removeOwnUserRoomSummary(db, authUser.uid, normalized).catch(() => {});
       closeSessionOnly();
       role = null;
       roomCode = "";
@@ -677,6 +776,7 @@
       beginSession("guest", normalized, onReceiveCallback);
       await withDbStep("Refresh room activity", () => touchRoomActivity(db, { force: true }));
       await withDbStep("Sync room index", () => syncRoomIndexFromLifecycle(db, normalized));
+      await withDbStep("Sync guest user room summary", () => upsertOwnUserRoomSummary(db, authUser.uid, normalized, "guest"));
       await withDbStep("Set guest presence", () => setupPresence(db));
       subscribeRelayListeners(db);
       startKeepalive();
@@ -688,6 +788,7 @@
         db.ref(`rooms/${normalized}/guestUid`).remove().catch(() => {});
         db.ref(`rooms/${normalized}/memberMap/${authUser.uid}`).remove().catch(() => {});
         syncRoomIndexFromLifecycle(db, normalized).catch(() => {});
+        removeOwnUserRoomSummary(db, authUser.uid, normalized).catch(() => {});
       }
       closeSessionOnly();
       role = null;
@@ -770,9 +871,153 @@
     }
   }
 
+  async function readRoomSnapshotByCodeInternal(db, code) {
+    const targetCode = normalizeRoomCode(code);
+    if (!targetCode) return null;
+    try {
+      const snapshotNode = await db.ref(`rooms/${targetCode}/snapshot`).once("value");
+      const payload = snapshotNode?.val();
+      if (!payload || typeof payload !== "object") return null;
+      if (typeof payload.state !== "string" || !payload.state.trim()) return null;
+      const turnIndex = Number(payload.turnIndex);
+      if (!Number.isFinite(turnIndex) || turnIndex < 0) return null;
+      const updatedAt = Number(payload.updatedAt || 0);
+      return {
+        state: payload.state,
+        turnIndex: Math.max(0, Math.floor(turnIndex)),
+        updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? Math.floor(updatedAt) : 0,
+      };
+    } catch (err) {
+      console.warn("rtc readRoomSnapshotByCode failed", { roomCode: targetCode, err });
+      return null;
+    }
+  }
+
+  async function readSelfMemberRoleInternal(db, roomCodeValue, authUid) {
+    const normalizedRoomCode = normalizeRoomCode(roomCodeValue);
+    const normalizedUid = String(authUid || "").trim();
+    if (!normalizedRoomCode || !normalizedUid) return null;
+    try {
+      const snapshot = await db.ref(`rooms/${normalizedRoomCode}/memberMap/${normalizedUid}`).once("value");
+      const raw = String(snapshot?.val() || "").trim().toLowerCase();
+      if (raw === "host" || raw === "guest") {
+        return raw;
+      }
+      return null;
+    } catch (err) {
+      console.warn("rtc readSelfMemberRole failed", { roomCode: normalizedRoomCode, err });
+      return null;
+    }
+  }
+
+  function normalizeUserRoomSummary(rawSummary, fallbackRoomCode = "") {
+    if (!rawSummary || typeof rawSummary !== "object") return null;
+    const roomCodeValue = normalizeRoomCode(rawSummary.roomCode || fallbackRoomCode);
+    const roleValue = String(rawSummary.role || "").trim().toLowerCase();
+    const joinStateValue = normalizeJoinState(rawSummary.joinState);
+    const updatedAtValue = Number(rawSummary.updatedAt || 0);
+    const lastActiveAtValue = Number(rawSummary.lastActiveAt || 0);
+    const expiresAtValue = Number(rawSummary.expiresAt || 0);
+    if (!roomCodeValue) return null;
+    if (roleValue !== "host" && roleValue !== "guest") return null;
+    return {
+      roomCode: roomCodeValue,
+      role: roleValue,
+      joinState: joinStateValue,
+      updatedAt: Number.isFinite(updatedAtValue) && updatedAtValue > 0 ? Math.floor(updatedAtValue) : 0,
+      lastActiveAt: Number.isFinite(lastActiveAtValue) && lastActiveAtValue > 0 ? Math.floor(lastActiveAtValue) : 0,
+      expiresAt: Number.isFinite(expiresAtValue) && expiresAtValue > 0 ? Math.floor(expiresAtValue) : 0,
+    };
+  }
+
+  async function listOwnUserRoomSummaries(db, authUid) {
+    const normalizedUid = String(authUid || "").trim();
+    if (!normalizedUid) return [];
+    try {
+      const snapshot = await db.ref(`userRooms/${normalizedUid}`).once("value");
+      const raw = snapshot?.val();
+      if (!raw || typeof raw !== "object") return [];
+      const items = [];
+      const staleRoomCodes = [];
+      const rawEntries = Object.entries(raw);
+      await Promise.all(
+        rawEntries.map(async ([roomCodeKey, summaryValue]) => {
+          const stored = normalizeUserRoomSummary(summaryValue, roomCodeKey);
+          if (!stored) {
+            staleRoomCodes.push(String(roomCodeKey || ""));
+            return;
+          }
+          let roomIndex = null;
+          let metadata = null;
+          let selfRole = null;
+          try {
+            [roomIndex, metadata, selfRole] = await Promise.all([
+              readRoomIndexInternal(db, stored.roomCode),
+              readRoomLifecycleMetadataInternal(db, stored.roomCode),
+              readSelfMemberRoleInternal(db, stored.roomCode, normalizedUid),
+            ]);
+          } catch (_err) {
+            staleRoomCodes.push(stored.roomCode);
+            return;
+          }
+          const resolvedRole =
+            selfRole === "host" || selfRole === "guest"
+              ? selfRole
+              : metadata.hostUid === normalizedUid
+                ? "host"
+                : metadata.guestUid === normalizedUid
+                  ? "guest"
+                  : null;
+          const roomMissing = !metadata.hostUid && !metadata.guestUid && roomIndex.exists !== true;
+          if (!resolvedRole || roomMissing) {
+            staleRoomCodes.push(stored.roomCode);
+            return;
+          }
+          const freshPayload = buildUserRoomSummaryPayload(
+            stored.roomCode,
+            resolvedRole,
+            metadata,
+            roomIndex,
+            Date.now()
+          );
+          if (!freshPayload) {
+            staleRoomCodes.push(stored.roomCode);
+            return;
+          }
+          const normalizedFresh = normalizeUserRoomSummary(freshPayload, stored.roomCode);
+          if (!normalizedFresh) {
+            staleRoomCodes.push(stored.roomCode);
+            return;
+          }
+          items.push(normalizedFresh);
+          const needsRewrite =
+            stored.role !== normalizedFresh.role ||
+            stored.joinState !== normalizedFresh.joinState ||
+            stored.updatedAt !== normalizedFresh.updatedAt ||
+            stored.lastActiveAt !== normalizedFresh.lastActiveAt ||
+            stored.expiresAt !== normalizedFresh.expiresAt;
+          if (needsRewrite) {
+            db.ref(`userRooms/${normalizedUid}/${stored.roomCode}`).set(freshPayload).catch(() => {});
+          }
+        })
+      );
+      for (const staleCode of staleRoomCodes) {
+        removeOwnUserRoomSummary(db, normalizedUid, staleCode).catch(() => {});
+      }
+      items.sort((a, b) => {
+        if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+        return a.roomCode.localeCompare(b.roomCode);
+      });
+      return items;
+    } catch (err) {
+      console.warn("rtc listOwnUserRoomSummaries failed", err);
+      return [];
+    }
+  }
+
   async function removeRoom(inputRoomCode) {
     const db = getDbOrThrow();
-    await waitForAuthUser();
+    const authUser = await waitForAuthUser();
     const normalized = normalizeRoomCode(inputRoomCode);
     if (!normalized) return false;
     assertValidRoomCode(normalized);
@@ -780,6 +1025,7 @@
       const updates = {};
       updates[`rooms/${normalized}`] = null;
       updates[`roomIndex/${normalized}`] = null;
+      updates[`userRooms/${authUser.uid}/${normalized}`] = null;
       await db.ref().update(updates);
       return true;
     } catch (err) {
@@ -827,6 +1073,9 @@
       await withDbStep("Clear messages", () => db.ref(roomPath("messages")).remove());
       await withDbStep("Refresh room activity", () => touchRoomActivity(db, { force: true }));
       await withDbStep("Sync room index", () => syncRoomIndexFromLifecycle(db, normalized));
+      await withDbStep("Sync rejoin user room summary", () =>
+        upsertOwnUserRoomSummary(db, authUser.uid, normalized, normalizedRole)
+      );
       await withDbStep("Set rejoin presence", () => setupPresence(db));
       subscribeRelayListeners(db);
       startKeepalive();
@@ -894,6 +1143,10 @@
     try {
       await db.ref(`rooms/${targetRoomCode}`).update(payload);
       await syncRoomIndexFromLifecycle(db, targetRoomCode);
+      const authUid = String(window._firebaseAuth?.currentUser?.uid || "").trim();
+      if (authUid) {
+        await upsertOwnUserRoomSummary(db, authUid, targetRoomCode, normalizedRole);
+      }
       if (targetRoomCode === roomCode) {
         lastRoomActivityTouchAt = nowMs;
       }
@@ -969,17 +1222,34 @@
       const authUser = await waitForAuthUser();
       const normalized = normalizeRoomCode(inputRoomCode);
       if (!normalized || !authUser?.uid) return null;
-      try {
-        const snapshot = await db.ref(`rooms/${normalized}/memberMap/${authUser.uid}`).once("value");
-        const raw = String(snapshot?.val() || "").trim().toLowerCase();
-        if (raw === "host" || raw === "guest") {
-          return raw;
-        }
-        return null;
-      } catch (err) {
-        console.warn("rtc readSelfMemberRole failed", { roomCode: normalized, err });
-        return null;
-      }
+      return readSelfMemberRoleInternal(db, normalized, authUser.uid);
+    },
+    async listOwnRoomSummaries() {
+      const db = getDbOrThrow();
+      const authUser = await waitForAuthUser();
+      return listOwnUserRoomSummaries(db, authUser?.uid || "");
+    },
+    async readRoomSnapshotByCode(inputRoomCode) {
+      const db = getDbOrThrow();
+      await waitForAuthUser();
+      const normalized = normalizeRoomCode(inputRoomCode);
+      if (!normalized) return null;
+      return readRoomSnapshotByCodeInternal(db, normalized);
+    },
+    async removeOwnRoomSummary(inputRoomCode) {
+      const db = getDbOrThrow();
+      const authUser = await waitForAuthUser();
+      const normalized = normalizeRoomCode(inputRoomCode);
+      if (!normalized || !authUser?.uid) return false;
+      return removeOwnUserRoomSummary(db, authUser.uid, normalized);
+    },
+    async syncOwnRoomSummary(inputRoomCode, inputRole) {
+      const db = getDbOrThrow();
+      const authUser = await waitForAuthUser();
+      const normalized = normalizeRoomCode(inputRoomCode);
+      const normalizedRole = inputRole === "host" || inputRole === "guest" ? inputRole : "";
+      if (!normalized || !normalizedRole || !authUser?.uid) return false;
+      return upsertOwnUserRoomSummary(db, authUser.uid, normalized, normalizedRole);
     },
     onStatusChange,
     onHeartbeat,
