@@ -4101,6 +4101,10 @@ function endRoundDraw() {
     addSystemLog(state.message);
   }
 
+  if (isOnlineFriendSessionActive() && state.roundTransition?.open && !state.matchOver) {
+    applyOnlineWaitingStateFromCurrentTurn("round-transition-local");
+  }
+
   renderAll();
 }
 
@@ -4162,6 +4166,10 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
     const nextMonth = describeMonthNameOnly(state.roundTransition.nextGameNumber);
     state.message = `Game End: ${winner.name} wins ${scored}. Next Game: ${nextMonth}.`;
     addSystemLog(state.message);
+  }
+
+  if (isOnlineFriendSessionActive() && state.roundTransition?.open && !state.matchOver) {
+    applyOnlineWaitingStateFromCurrentTurn("round-transition-local");
   }
 
   renderAll();

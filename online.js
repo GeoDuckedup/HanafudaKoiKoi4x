@@ -110,6 +110,13 @@
 
     function applyOnlineWaitingStateFromCurrentTurn(reason) {
       if (!isOnlineFriendSessionActive()) return;
+      if (state.roundTransition?.open && state.roundOver && !state.matchOver) {
+        state.rtcWaiting = false;
+        setFriendInterstitialOpen(false);
+        setFriendInterstitialStatus("", false);
+        debugOnlineInit("waiting-state-round-transition", { active: true, reason });
+        return;
+      }
       const localPlayerIndex = getOnlineLocalPlayerIndex();
       const turnOwner = state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : null;
       const shouldWait = localPlayerIndex === null || turnOwner === null || localPlayerIndex !== turnOwner;
