@@ -1494,7 +1494,6 @@ function buildLocalSavedMatchFromState() {
 
 function normalizeLocalResumeStateForSafety() {
   if (!isFriendMode()) return;
-  if (isOnlineFriendSessionActive()) return;
 
   const isInStableStateZones = (cardId) => {
     if (!cardId) return false;
@@ -1611,6 +1610,12 @@ async function resumeLocalMatchFromSavedMatch(savedMatch) {
     state.rtcWaiting = false;
     hideStartMenu();
     normalizeLocalResumeStateForSafety();
+    if (!state.roundOver && !state.matchOver) {
+      const current = state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : 0;
+      if (!state.interstitial?.open) {
+        state.viewerPlayerIndex = current;
+      }
+    }
     setCodePanelOpen(false);
     renderAll();
     requestLocalAutosave("resume-normalized");
@@ -1638,7 +1643,6 @@ function cacheUI() {
   ui.mainMenuBtn = document.getElementById("main-menu-btn");
   ui.gameSummaryPanel = document.getElementById("game-summary-panel");
   ui.roundSummaryBody = document.getElementById("round-summary-body");
-  ui.cpuHandCount = document.getElementById("cpu-hand-count");
   ui.deckCount = document.getElementById("deck-count");
   ui.cpuCapturedCount = document.getElementById("cpu-captured-count");
   ui.playerCapturedCount = document.getElementById("player-captured-count");
@@ -4605,7 +4609,6 @@ function renderTop() {
     ui.onlineLeaveBtn.disabled = !showOnlineLeave;
   }
 
-  ui.cpuHandCount.textContent = `${state.players[topPlayerIndex].hand.length} cards`;
   ui.deckCount.textContent = `Deck: ${state.drawPile.length}`;
 
   ui.cpuCapturedCount.textContent = String(state.players[topPlayerIndex].captured.length);

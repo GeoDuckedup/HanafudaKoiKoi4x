@@ -10,8 +10,8 @@
   --card-h: 89px;
   --mini-w: 36px;
   --mini-h: 45px;
-  --cpu-card-w: 44px;
-  --cpu-card-h: 55px;
+  --mini-hand-card-w: 30px;
+  --mini-hand-card-h: 38px;
   --turn-rail-a: rgba(255, 194, 92, 0.36);
   --turn-rail-b: rgba(255, 160, 43, 0.2);
   --hand-ready-ring: rgba(245, 166, 35, 1);
@@ -164,7 +164,6 @@ button.ghost {
   font-size: 0.8rem;
 }
 
-.opponent-zone,
 .field-zone,
 .captured-zone,
 .player-zone,
@@ -274,14 +273,31 @@ button.ghost {
   animation: koiPulse4 1.15s ease-in-out infinite;
 }
 
-.opponent-zone,
 .player-zone,
 .field-zone {
   padding-bottom: 7px;
 }
 
-.opponent-zone {
-  padding-bottom: 5px;
+.hand-zone-header {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.opponent-mini-panel {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mini-label {
+  font-size: 0.66rem;
+}
+
+.mini-label .header-score {
+  font-size: 1rem;
 }
 
 .player-zone.turn-ready .hand.player {
@@ -308,23 +324,23 @@ button.ghost {
 
 .cpu-hand-strip {
   display: flex;
-  gap: 5px;
-  padding: 0 8px;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0;
+  overflow: hidden;
 }
 
 .cpu-hand-strip .card,
 .cpu-hand-strip .card-back {
-  width: var(--cpu-card-w);
-  height: var(--cpu-card-h);
-  border-radius: 5px;
+  width: var(--mini-hand-card-w);
+  height: var(--mini-hand-card-h);
+  border-radius: 4px;
   border-width: 1px;
 }
 
 @media (max-width: 699px) {
   .cpu-hand-strip {
-    gap: 4px;
+    gap: 1px;
   }
 }
 
@@ -333,15 +349,6 @@ button.ghost {
 }
 
 .hand::-webkit-scrollbar-thumb {
-  background: #b59667;
-  border-radius: 8px;
-}
-
-.cpu-hand-strip::-webkit-scrollbar {
-  height: 6px;
-}
-
-.cpu-hand-strip::-webkit-scrollbar-thumb {
   background: #b59667;
   border-radius: 8px;
 }
@@ -1493,7 +1500,7 @@ button.ghost {
     --card-h: 104px;
     --mini-w: 42px;
     --mini-h: 52px;
-    --cpu-card-w: 50px;
-    --cpu-card-h: 62px;
+    --mini-hand-card-w: 34px;
+    --mini-hand-card-h: 43px;
   }
 }

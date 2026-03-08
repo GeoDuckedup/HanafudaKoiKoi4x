@@ -49,17 +49,13 @@
         </div>
       </section>
 
-      <section class="opponent-zone">
-        <div class="zone-header">
-          <span id="cpu-hand-label" class="zone-title-with-score">CPU Hand <strong id="cpu-score-inline" class="header-score">0</strong></span>
-          <span id="cpu-hand-count">8 cards</span>
-        </div>
-        <div id="cpu-hand" class="cpu-hand-strip"></div>
-      </section>
-
       <section id="player-zone" class="player-zone">
-        <div class="zone-header">
+        <div class="zone-header hand-zone-header">
           <span id="player-hand-label" class="zone-title-with-score">Your Hand <strong id="player-score-inline" class="header-score">0</strong></span>
+          <div class="opponent-mini-panel">
+            <span id="cpu-hand-label" class="zone-title-with-score mini-label">CPU Hand <strong id="cpu-score-inline" class="header-score">0</strong></span>
+            <div id="cpu-hand" class="cpu-hand-strip"></div>
+          </div>
         </div>
         <div id="hand-lock-note" class="hand-lock-note is-muted"></div>
         <div id="player-hand" class="hand player"></div>
