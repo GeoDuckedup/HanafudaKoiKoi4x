@@ -115,6 +115,22 @@ body {
   justify-content: flex-end;
 }
 
+.online-room-chip {
+  position: fixed;
+  right: 10px;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  z-index: 70;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.online-room-chip[hidden] {
+  display: none !important;
+}
+
 .subtitle {
   margin: 2px 0 0;
   font-size: 0.72rem;
@@ -961,6 +977,53 @@ button.ghost {
   color: #5f4b35;
 }
 
+.start-inline-note {
+  border: 1px solid #c78848;
+  background: #fff2de;
+  color: #71431f;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.start-inline-note[hidden] {
+  display: none !important;
+}
+
+.start-inline-note-close {
+  min-width: 30px;
+  padding: 4px 7px;
+}
+
+.start-resume-card {
+  border: 1px solid #b49362;
+  background: #fff9ed;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.start-resume-card[hidden] {
+  display: none !important;
+}
+
+.start-resume-text {
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: #4f3722;
+}
+
+.start-resume-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
 .start-actions {
   display: grid;
   grid-template-columns: 1fr;
@@ -1029,6 +1092,30 @@ button.ghost {
   font-size: 1.35rem;
   letter-spacing: 0.12em;
   color: #2f2417;
+}
+
+.online-bookmark-prompt {
+  border: 1px dashed #b49362;
+  border-radius: 10px;
+  background: #fff9ed;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.73rem;
+  font-weight: 700;
+  color: #4f3722;
+}
+
+.online-bookmark-prompt[hidden] {
+  display: none !important;
+}
+
+.online-bookmark-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
 }
 
 .rules-panel {

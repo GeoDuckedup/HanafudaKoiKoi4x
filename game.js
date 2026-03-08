@@ -375,6 +375,8 @@ const ONLINE_ROOM_CODE_LENGTH = 10;
 const ONLINE_ROOM_CODE_REGEX = /^[A-Z0-9]{10}$/;
 const ONLINE_AUTH_READY_TIMEOUT_MS = 70_000;
 const ONLINE_HOST_CREATE_MAX_ATTEMPTS = 5;
+const ONLINE_STORAGE_ROOM_KEY = "hkk_online_room";
+const ONLINE_STORAGE_ROLE_KEY = "hkk_online_role";
 
 const drawPreviewFx = {
   lastCardId: null,
@@ -421,10 +423,16 @@ function init() {
   bindRtcBridge();
   bindFirebaseOnlineAuth();
   preloadSheets()
-    .then(() => {
+    .then(async () => {
       state.ready = true;
-      showStartMenu();
-      tryLoadFromLocationHash();
+      const reconnectResult = await attemptOnlineResumeOnLoad();
+      if (!reconnectResult.resumed) {
+        showStartMenu();
+        if (reconnectResult.notice) {
+          setCodeStatus(reconnectResult.notice, false, "start");
+        }
+        tryLoadFromLocationHash();
+      }
     })
     .catch((err) => {
       addSystemLog(`Could not load card images: ${err.message}`);
@@ -441,510 +449,385 @@ function getRtcBridge() {
   return window.rtcBridge;
 }
 
+function normalizeOnlineRoleValue(rawRole) {
+  return rawRole === "host" || rawRole === "guest" ? rawRole : null;
+}
+
+function readOnlineSessionContextFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const roomCode = String(params.get("room") || "")
+      .trim()
+      .toUpperCase();
+    const role = normalizeOnlineRoleValue(String(params.get("role") || "").trim().toLowerCase());
+    if (!ONLINE_ROOM_CODE_REGEX.test(roomCode) || !role) {
+      return null;
+    }
+    return { roomCode, role };
+  } catch (_err) {
+    return null;
+  }
+}
+
+function readOnlineSessionContextFromStorage() {
+  try {
+    const roomCode = String(localStorage.getItem(ONLINE_STORAGE_ROOM_KEY) || "")
+      .trim()
+      .toUpperCase();
+    const role = normalizeOnlineRoleValue(String(localStorage.getItem(ONLINE_STORAGE_ROLE_KEY) || "").trim().toLowerCase());
+    if (!ONLINE_ROOM_CODE_REGEX.test(roomCode) || !role) {
+      return null;
+    }
+    return { roomCode, role };
+  } catch (_err) {
+    return null;
+  }
+}
+
+function persistOnlineSessionContext(roomCode, role) {
+  const normalizedRoomCode = String(roomCode || "")
+    .trim()
+    .toUpperCase();
+  const normalizedRole = normalizeOnlineRoleValue(String(role || "").trim().toLowerCase());
+  if (!ONLINE_ROOM_CODE_REGEX.test(normalizedRoomCode) || !normalizedRole) return;
+  try {
+    localStorage.setItem(ONLINE_STORAGE_ROOM_KEY, normalizedRoomCode);
+    localStorage.setItem(ONLINE_STORAGE_ROLE_KEY, normalizedRole);
+  } catch (_err) {
+    // Ignore storage failures.
+  }
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("room", normalizedRoomCode);
+    url.searchParams.set("role", normalizedRole);
+    const nextUrl = `${url.pathname}?${url.searchParams.toString()}${url.hash || ""}`;
+    window.history.pushState({}, "", nextUrl);
+  } catch (_err) {
+    // Ignore URL update failures.
+  }
+}
+
+function clearOnlineSessionContext() {
+  try {
+    localStorage.removeItem(ONLINE_STORAGE_ROOM_KEY);
+    localStorage.removeItem(ONLINE_STORAGE_ROLE_KEY);
+  } catch (_err) {
+    // Ignore storage failures.
+  }
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("room") && !url.searchParams.has("role")) {
+      return;
+    }
+    url.searchParams.delete("room");
+    url.searchParams.delete("role");
+    const query = url.searchParams.toString();
+    const nextUrl = `${url.pathname}${query ? `?${query}` : ""}${url.hash || ""}`;
+    window.history.pushState({}, "", nextUrl);
+  } catch (_err) {
+    // Ignore URL cleanup failures.
+  }
+}
+
 function bindRtcBridge() {
-  const rtc = getRtcBridge();
-  if (!rtc || typeof rtc.onStatusChange !== "function") {
-    state.rtcStatus = "idle";
-    return;
-  }
-  rtc.onStatusChange((nextStatus) => {
-    state.rtcStatus = String(nextStatus || "idle");
-    if (state.rtcPendingStart) {
-      if (state.rtcStatus === "connecting") {
-        setStartOnlineStatus(`Connecting room ${state.rtcRoomCode}...`, false);
-      } else if (state.rtcStatus === "disconnected" || state.rtcStatus === "error") {
-        setStartOnlineStatus("Connection failed. Try hosting/joining again.", true);
-      } else if (state.rtcStatus === "connected") {
-        setStartOnlineStatus("Connection established. Starting match...", false);
-      }
-    }
-    if (state.rtcRole && state.rtcStatus === "disconnected") {
-      setFriendInterstitialStatus("Connection lost. Use Copy Turn Link / Load Turn Link to continue.", true);
-    } else if (state.rtcRole && state.rtcStatus === "error") {
-      setFriendInterstitialStatus("Connection error. Use Copy Turn Link / Load Turn Link to continue.", true);
-    } else if (state.rtcRole && state.rtcStatus === "connected" && state.rtcWaiting) {
-      setFriendInterstitialStatus("Connected. Waiting for incoming handoff.", false);
-    }
-    if (state.rtcPendingStart && state.rtcStatus === "connected") {
-      beginOnlineFriendMatch();
-    }
-    if (state.ready) {
-      renderAll();
-    }
-  });
-  if (typeof rtc.onHeartbeat === "function") {
-    rtc.onHeartbeat(() => {
-      triggerRtcHeartbeatPulse();
-    });
-  }
-  state.rtcStatus = String(rtc.getStatus?.() || "idle");
+  return getOnlineRuntimeController().bindRtcBridge();
 }
 
 function setOnlineAuthState(nextState, message = "") {
-  const normalized = nextState === "ready" ? "ready" : nextState === "error" ? "error" : "pending";
-  state.onlineAuthState = normalized;
-  state.onlineAuthMessage = String(message || "");
-  applyOnlineAuthUiState();
+  return getOnlineStartController().setOnlineAuthState(nextState, message);
 }
 
 function getOnlineAuthBlockingMessage() {
-  if (state.onlineAuthState === "error") {
-    if (state.onlineAuthMessage) return state.onlineAuthMessage;
-    return "Online mode unavailable: anonymous sign-in failed.";
-  }
-  if (state.onlineAuthState === "pending") {
-    return state.onlineAuthMessage || "Online mode is still signing in anonymously. Please wait.";
-  }
-  return "";
+  return getOnlineStartController().getOnlineAuthBlockingMessage();
 }
 
 function isOnlineAuthReady() {
-  return state.onlineAuthState === "ready";
+  return getOnlineStartController().isOnlineAuthReady();
 }
 
 function applyOnlineAuthUiState() {
-  const ready = isOnlineAuthReady();
-  if (ui.onlineHostBtn) ui.onlineHostBtn.disabled = !ready;
-  if (ui.onlineJoinBtn) ui.onlineJoinBtn.disabled = !ready;
-  if (ui.onlineRoomCodeInput) ui.onlineRoomCodeInput.disabled = !ready;
-  if (ui.startOnlinePanel && !ui.startOnlinePanel.hidden && !ready) {
-    setStartOnlineStatus(getOnlineAuthBlockingMessage(), state.onlineAuthState === "error");
-  }
+  return getOnlineStartController().applyOnlineAuthUiState();
 }
 
 function ensureOnlineAuthReadyForStart() {
-  if (isOnlineAuthReady()) return true;
-  setStartOnlineStatus(getOnlineAuthBlockingMessage(), state.onlineAuthState === "error");
-  applyOnlineAuthUiState();
-  return false;
+  return getOnlineStartController().ensureOnlineAuthReadyForStart();
 }
 
 function bindFirebaseOnlineAuth() {
-  const auth = window._firebaseAuth;
-  if (!auth || !window._firebaseDb) {
-    setOnlineAuthState("error", "Online mode unavailable: Firebase initialization failed.");
-    return;
-  }
-  if (auth.currentUser?.uid) {
-    setOnlineAuthState("ready", "");
-    return;
-  }
-  setOnlineAuthState("pending", "Online mode is signing in anonymously...");
-  const readyPromise = window._firebaseAuthReady;
-  if (!readyPromise || typeof readyPromise.then !== "function") {
-    setOnlineAuthState("error", "Online mode unavailable: anonymous sign-in did not start.");
-    return;
-  }
-
-  let settled = false;
-  const finish = (nextState, message) => {
-    if (settled) return;
-    settled = true;
-    setOnlineAuthState(nextState, message);
-  };
-  const timeoutId = setTimeout(() => {
-    finish("error", "Online mode unavailable: anonymous auth timed out. Reload and try again.");
-  }, ONLINE_AUTH_READY_TIMEOUT_MS);
-
-  readyPromise
-    .then(() => {
-      if (settled) return;
-      clearTimeout(timeoutId);
-      if (auth.currentUser?.uid) {
-        finish("ready", "");
-        return;
-      }
-      const fallbackError = String(window._firebaseAuthError || "").trim();
-      if (fallbackError) {
-        finish("error", `Online mode unavailable: ${fallbackError}`);
-        return;
-      }
-      finish(
-        "error",
-        "Online mode unavailable: anonymous sign-in failed. Enable Anonymous auth in Firebase Console."
-      );
-    })
-    .catch((err) => {
-      if (settled) return;
-      clearTimeout(timeoutId);
-      const message = String(err?.message || window._firebaseAuthError || "Anonymous auth failed.");
-      finish("error", `Online mode unavailable: ${message}`);
-    });
+  return getOnlineStartController().bindFirebaseOnlineAuth();
 }
 
 function normalizeRoomCodeInput(raw) {
-  return String(raw || "")
-    .trim()
-    .toUpperCase()
-    .replaceAll(/[^A-Z0-9]/g, "")
-    .slice(0, ONLINE_ROOM_CODE_LENGTH);
+  return getOnlineStartController().normalizeRoomCodeInput(raw);
 }
 
 function isOnlineRoomCodeCollisionError(err) {
-  const message = String(err?.message || err || "");
-  return message.includes("Room code already in use");
+  return getOnlineStartController().isOnlineRoomCodeCollisionError(err);
+}
+
+let onlineSessionController = null;
+let onlineStartController = null;
+let onlineRuntimeController = null;
+let onlineHandoffController = null;
+let codeIoController = null;
+
+function getOnlineSessionController() {
+  if (onlineSessionController) return onlineSessionController;
+  if (!window.createOnlineSessionController || typeof window.createOnlineSessionController !== "function") {
+    throw new Error("Online session controller is not loaded.");
+  }
+  onlineSessionController = window.createOnlineSessionController({
+    state,
+    isFriendMode,
+    getRtcBridge,
+    setFriendInterstitialOpen,
+    setFriendInterstitialStatus,
+    encodeStateToCode,
+    encodeBase64UrlUtf8,
+    decodeBase64UrlUtf8,
+    RTC_SIGNAL_PREFIX,
+    startNewMatch,
+    hideStartMenu,
+    addSystemLog,
+    renderAll,
+    loadCodeIntoGame,
+    asNullablePlayerIndex,
+    asInt,
+    isRoundTransitionReadyForAdvance,
+    onNextGame,
+    persistOnlineSessionContext,
+    onRtcReceiveTurnCode,
+  });
+  return onlineSessionController;
+}
+
+function getOnlineStartController() {
+  if (onlineStartController) return onlineStartController;
+  if (!window.createOnlineStartController || typeof window.createOnlineStartController !== "function") {
+    throw new Error("Online start controller is not loaded.");
+  }
+  onlineStartController = window.createOnlineStartController({
+    state,
+    ui,
+    getRtcBridge,
+    setStartManualLoadVisible,
+    setCodeStatus,
+    resetRtcSession,
+    debugOnlineInit,
+    describeTurnOwnerForDebug,
+    renderAll,
+    beginOnlineFriendMatch,
+    tryDecodeRtcSignal,
+    handleIncomingRtcSignal,
+    loadCodeIntoGame,
+    setFriendInterstitialOpen,
+    setFriendInterstitialStatus,
+    isFriendMode,
+    applyOnlineWaitingStateFromCurrentTurn,
+    handleOnlineReconnect,
+    persistOnlineSessionContext,
+    readOnlineSessionContextFromUrl,
+    readOnlineSessionContextFromStorage,
+    clearOnlineSessionContext,
+    onlineRoomCodeLength: ONLINE_ROOM_CODE_LENGTH,
+    onlineRoomCodeRegex: ONLINE_ROOM_CODE_REGEX,
+    onlineAuthReadyTimeoutMs: ONLINE_AUTH_READY_TIMEOUT_MS,
+    onlineHostCreateMaxAttempts: ONLINE_HOST_CREATE_MAX_ATTEMPTS,
+  });
+  return onlineStartController;
+}
+
+function getOnlineRuntimeController() {
+  if (onlineRuntimeController) return onlineRuntimeController;
+  if (!window.createOnlineRuntimeController || typeof window.createOnlineRuntimeController !== "function") {
+    throw new Error("Online runtime controller is not loaded.");
+  }
+  onlineRuntimeController = window.createOnlineRuntimeController({
+    state,
+    getRtcBridge,
+    setStartOnlineStatus,
+    setFriendInterstitialStatus,
+    beginOnlineFriendMatch,
+    handleRtcDisconnectAutoReconnect,
+    renderAll,
+    setStartOnlineRoomDisplay,
+    applyOnlineAuthUiState,
+    clearOnlineSessionContext,
+    clearOnlineRealtimeSubscriptions,
+  });
+  return onlineRuntimeController;
+}
+
+function getOnlineHandoffController() {
+  if (onlineHandoffController) return onlineHandoffController;
+  if (!window.createOnlineHandoffController || typeof window.createOnlineHandoffController !== "function") {
+    throw new Error("Online handoff controller is not loaded.");
+  }
+  onlineHandoffController = window.createOnlineHandoffController({
+    state,
+    ui,
+    setCodeStatus,
+    setFriendManualLoadVisible,
+    tryLoadFromClipboardOrManual,
+    isFriendMode,
+    asPlayerIndex,
+    isOnlineFriendSessionActive,
+    getRtcBridge,
+    encodeStateForOnline,
+    sendOnlineTurnCodeWithSnapshot,
+    handleRtcReconnectRetry,
+    encodeStateToCode,
+    buildShareLinkFromCode,
+    playTurnRecapForViewer,
+    renderAll,
+    resetRtcSession,
+    showStartMenu,
+  });
+  return onlineHandoffController;
+}
+
+function getCodeIoController() {
+  if (codeIoController) return codeIoController;
+  if (!window.createCodeIoController || typeof window.createCodeIoController !== "function") {
+    throw new Error("Code IO controller is not loaded.");
+  }
+  codeIoController = window.createCodeIoController({
+    state,
+    ui,
+    loadCodeIntoGame,
+    setStartManualLoadVisible,
+    setFriendManualLoadVisible,
+    setCodeStatus,
+  });
+  return codeIoController;
 }
 
 function isOnlineFriendSessionActive() {
-  return isFriendMode() && Boolean(state.rtcRole && state.rtcRoomCode);
+  return getOnlineSessionController().isOnlineFriendSessionActive();
 }
 
 function getOnlineLocalPlayerIndex() {
-  if (!isOnlineFriendSessionActive()) return null;
-  if (state.rtcRole === "host") return 0;
-  if (state.rtcRole === "guest") return 1;
-  return null;
+  return getOnlineSessionController().getOnlineLocalPlayerIndex();
 }
 
 function getOnlineRemoteRole() {
-  if (state.rtcRole === "host") return "guest";
-  if (state.rtcRole === "guest") return "host";
-  return null;
+  return getOnlineSessionController().getOnlineRemoteRole();
 }
 
 function describeTurnOwnerForDebug(owner = state.currentPlayer) {
-  if (owner !== 0 && owner !== 1) return "none";
-  const playerName = state.players?.[owner]?.name || `P${owner + 1}`;
-  return `${owner} (${playerName})`;
+  return getOnlineSessionController().describeTurnOwnerForDebug(owner);
 }
 
 function debugOnlineInit(event, details = {}) {
-  console.info("[online-init]", event, {
-    localRole: state.rtcRole || "none",
-    remoteRole: getOnlineRemoteRole() || "none",
-    currentTurnOwner: describeTurnOwnerForDebug(),
-    ...details,
-  });
+  return getOnlineSessionController().debugOnlineInit(event, details);
 }
 
 function getOnlineRoleAssignmentDebug() {
-  return {
-    hostPlayerIndex: 0,
-    guestPlayerIndex: 1,
-  };
+  return getOnlineSessionController().getOnlineRoleAssignmentDebug();
 }
 
 function getOnlineStartupDebugState(extra = {}) {
-  return {
-    rtcRole: state.rtcRole || "none",
-    dealer: state.dealer,
-    currentPlayer: state.currentPlayer,
-    viewerPlayerIndex: state.viewerPlayerIndex,
-    ...getOnlineRoleAssignmentDebug(),
-    ...extra,
-  };
+  return getOnlineSessionController().getOnlineStartupDebugState(extra);
 }
 
 function warnOnlineStartupInvariant(message, reason) {
-  console.warn("[online-startup]", message, getOnlineStartupDebugState({ reason }));
+  return getOnlineSessionController().warnOnlineStartupInvariant(message, reason);
 }
 
 function assertOnlineRoleMapping(reason) {
-  if (!isOnlineFriendSessionActive()) return;
-  const localPlayerIndex = getOnlineLocalPlayerIndex();
-  if (state.rtcRole === "host" && localPlayerIndex !== 0) {
-    warnOnlineStartupInvariant("Host role mapped to non-zero local player index.", reason);
-  }
-  if (state.rtcRole === "guest" && localPlayerIndex !== 1) {
-    warnOnlineStartupInvariant("Guest role mapped to non-one local player index.", reason);
-  }
+  return getOnlineSessionController().assertOnlineRoleMapping(reason);
 }
 
 function enforceInitialOnlineStartupState(reason) {
-  if (!isOnlineFriendSessionActive()) return;
-  state.dealer = 0;
-  state.currentPlayer = 0;
-  state.viewerPlayerIndex = state.rtcRole === "guest" ? 1 : 0;
-  assertOnlineRoleMapping(`${reason}-role-check`);
-  debugOnlineInit("online-startup-state-forced", getOnlineStartupDebugState({ reason }));
+  return getOnlineSessionController().enforceInitialOnlineStartupState(reason);
 }
 
 function applyOnlineWaitingStateFromCurrentTurn(reason) {
-  if (!isOnlineFriendSessionActive()) return;
-  const localPlayerIndex = getOnlineLocalPlayerIndex();
-  const turnOwner = state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : null;
-  const shouldWait = localPlayerIndex === null || turnOwner === null || localPlayerIndex !== turnOwner;
-  state.rtcWaiting = shouldWait;
-  if (shouldWait) {
-    setFriendInterstitialOpen(true, turnOwner);
-    const ownerName = turnOwner === null ? "opponent" : state.players?.[turnOwner]?.name || `P${turnOwner + 1}`;
-    setFriendInterstitialStatus(`Waiting for ${ownerName}. (${reason})`, false);
-    debugOnlineInit("waiting-state", { active: false, reason });
-    return;
-  }
-  setFriendInterstitialOpen(false);
-  setFriendInterstitialStatus("", false);
-  debugOnlineInit("waiting-state", { active: true, reason });
+  return getOnlineSessionController().applyOnlineWaitingStateFromCurrentTurn(reason);
 }
 
 function sendHostSessionInitSignal() {
-  if (state.rtcRole !== "host") return false;
-  if (state.rtcStatus !== "connected") return false;
-  if (state.rtcInitSent) return true;
-  assertOnlineRoleMapping("host-init-send");
-  if (state.dealer !== 0 || state.currentPlayer !== 0) {
-    warnOnlineStartupInvariant("About to send brand-new session-init with non-zero dealer/currentPlayer.", "host-init-send");
-  }
-  enforceInitialOnlineStartupState("host-init-send");
-  let code = "";
-  try {
-    code = encodeStateToCode();
-  } catch (err) {
-    setFriendInterstitialStatus(`Could not build init state: ${err.message}`, true);
-    debugOnlineInit("host-init-encode-failed", { reason: String(err?.message || err) });
-    return false;
-  }
-  const payload = {
-    type: "session-init",
-    roleAssignments: {
-      host: "player1",
-      guest: "player2",
-      hostPlayerIndex: 0,
-      guestPlayerIndex: 1,
-    },
-    currentTurnOwner: state.currentPlayer,
-    code,
-  };
-  const sent = sendRtcSignal(payload);
-  if (!sent) {
-    setFriendInterstitialStatus("Initial sync send failed. Use turn-link fallback.", true);
-    debugOnlineInit("host-init-send-failed");
-    return false;
-  }
-  state.rtcInitSent = true;
-  state.rtcInitApplied = true;
-  debugOnlineInit("host-init-sent", getOnlineStartupDebugState({ currentTurnOwnerAfterInit: describeTurnOwnerForDebug(state.currentPlayer) }));
-  return true;
+  return getOnlineSessionController().sendHostSessionInitSignal();
+}
+
+function encodeStateForOnline() {
+  return getOnlineSessionController().encodeStateForOnline();
 }
 
 function encodeRtcSignal(payload) {
-  const json = JSON.stringify(payload || {});
-  return `${RTC_SIGNAL_PREFIX}${encodeBase64UrlUtf8(json)}`;
+  return getOnlineSessionController().encodeRtcSignal(payload);
 }
 
 function tryDecodeRtcSignal(raw) {
-  const text = String(raw || "");
-  if (!text.startsWith(RTC_SIGNAL_PREFIX)) return null;
-  const encoded = text.slice(RTC_SIGNAL_PREFIX.length);
-  if (!encoded) {
-    throw new Error("RTC signal missing payload");
-  }
-  const decoded = decodeBase64UrlUtf8(encoded);
-  const parsed = JSON.parse(decoded);
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("RTC signal payload must be an object");
-  }
-  return parsed;
+  return getOnlineSessionController().tryDecodeRtcSignal(raw);
 }
 
 function sendRtcSignal(payload) {
-  const rtc = getRtcBridge();
-  if (!rtc || typeof rtc.sendTurnCode !== "function") return false;
-  try {
-    return rtc.sendTurnCode(encodeRtcSignal(payload));
-  } catch (err) {
-    console.warn("rtc signal send failed", err);
-    return false;
-  }
+  return getOnlineSessionController().sendRtcSignal(payload);
+}
+
+function sendOnlineTurnCodeWithSnapshot(stateCode, wirePayload, options = {}) {
+  return getOnlineSessionController().sendOnlineTurnCodeWithSnapshot(stateCode, wirePayload, options);
 }
 
 function syncOnlineRoundTransitionSnapshot() {
-  if (!isOnlineFriendSessionActive()) return true;
-  if (state.rtcStatus !== "connected") return false;
-  let code = "";
-  try {
-    code = encodeStateToCode();
-  } catch (err) {
-    console.warn("round-end snapshot encode failed", err);
-    return false;
-  }
-  return sendRtcSignal({
-    type: "turn-code",
-    reason: "round-end",
-    gameNumber: state.gameNumber,
-    code,
-  });
+  return getOnlineSessionController().syncOnlineRoundTransitionSnapshot();
 }
 
 function resetRtcSession(options = {}) {
-  const { closeConnection = false } = options;
-  if (state.rtcPulseTimer) {
-    clearTimeout(state.rtcPulseTimer);
-  }
-  state.rtcPulseTimer = null;
-  state.rtcHeartbeatPulse = false;
-  if (closeConnection) {
-    const rtc = getRtcBridge();
-    if (rtc && typeof rtc.closeRoom === "function") {
-      rtc.closeRoom();
-    }
-  }
-  state.rtcRole = null;
-  state.rtcRoomCode = "";
-  state.rtcWaiting = false;
-  state.rtcPendingStart = false;
-  state.rtcInitSent = false;
-  state.rtcInitApplied = false;
-  const rtc = getRtcBridge();
-  state.rtcStatus = String(rtc?.getStatus?.() || "idle");
-  setStartOnlineStatus("", false);
-  setStartOnlineRoomDisplay("");
-  applyOnlineAuthUiState();
+  return getOnlineRuntimeController().resetRtcSession(options);
 }
 
 function triggerRtcHeartbeatPulse() {
-  if (state.rtcPulseTimer) {
-    clearTimeout(state.rtcPulseTimer);
-  }
-  state.rtcHeartbeatPulse = false;
-  if (state.ready) renderAll();
-  state.rtcHeartbeatPulse = true;
-  state.rtcPulseTimer = setTimeout(() => {
-    state.rtcPulseTimer = null;
-    state.rtcHeartbeatPulse = false;
-    if (state.ready) renderAll();
-  }, 600);
-  if (state.ready) renderAll();
+  return getOnlineRuntimeController().triggerRtcHeartbeatPulse();
 }
 
 function setStartOnlineStatus(message, isError) {
-  const node = ui.startOnlineStatus;
-  if (!node) return;
-  node.textContent = message || "";
-  node.classList.toggle("error", Boolean(message && isError));
-  node.classList.toggle("success", Boolean(message && !isError));
+  return getOnlineStartController().setStartOnlineStatus(message, isError);
 }
 
 function setStartOnlinePanelMode(mode) {
-  const normalizedMode = mode === "join" ? "join" : "host";
-  state.startOnlineMode = normalizedMode;
-  const hostMode = normalizedMode === "host";
-  if (ui.startOnlinePanel) {
-    ui.startOnlinePanel.classList.toggle("is-host-mode", hostMode);
-  }
-  if (ui.onlineRoomCodeLabel) {
-    ui.onlineRoomCodeLabel.hidden = hostMode;
-  }
-  if (ui.onlineRoomCodeInput) {
-    ui.onlineRoomCodeInput.hidden = hostMode;
-  }
-  if (ui.onlineHostBtn) {
-    ui.onlineHostBtn.classList.toggle("primary", hostMode);
-  }
-  if (ui.onlineJoinBtn) {
-    ui.onlineJoinBtn.classList.toggle("primary", !hostMode);
-  }
-  setStartOnlineRoomDisplay(state.rtcRoomCode || "");
-  applyOnlineAuthUiState();
+  return getOnlineStartController().setStartOnlinePanelMode(mode);
 }
 
 function setStartOnlineRoomDisplay(roomCode) {
-  const hostMode = state.startOnlineMode !== "join";
-  if (ui.onlineRoomDisplay) {
-    ui.onlineRoomDisplay.hidden = !hostMode;
-  }
-  if (ui.onlineRoomCodeText) {
-    ui.onlineRoomCodeText.textContent = roomCode || "----------";
-  }
+  return getOnlineStartController().setStartOnlineRoomDisplay(roomCode);
 }
 
 function setStartOnlinePanelOpen(open) {
-  const isOpen = Boolean(open);
-  if (ui.startOnlinePanel) {
-    ui.startOnlinePanel.hidden = !isOpen;
-  }
-  if (isOpen) {
-    setStartManualLoadVisible(false);
-    setCodeStatus("", false, "start");
-  }
-  if (ui.startModeCpuBtn) ui.startModeCpuBtn.hidden = isOpen;
-  if (ui.startModeFriendBtn) ui.startModeFriendBtn.hidden = isOpen;
-  if (ui.startModeOnlineBtn) ui.startModeOnlineBtn.hidden = isOpen;
-  if (ui.startSubtitle) ui.startSubtitle.hidden = isOpen;
-  if (ui.startLoadActions) ui.startLoadActions.hidden = isOpen;
-  if (!isOpen) {
-    setStartOnlinePanelMode("host");
-    setStartOnlineStatus("", false);
-    setStartOnlineRoomDisplay("");
-    if (ui.onlineRoomCodeInput) {
-      ui.onlineRoomCodeInput.value = "";
-    }
-  }
-  applyOnlineAuthUiState();
+  return getOnlineStartController().setStartOnlinePanelOpen(open);
 }
 
 function beginOnlineFriendMatch() {
-  if (!state.rtcPendingStart) return;
-  const turnOwnerBeforeConnect = describeTurnOwnerForDebug(state.currentPlayer);
-  debugOnlineInit("begin-online-friend-match", { currentTurnOwnerBeforeConnect: turnOwnerBeforeConnect });
-  state.rtcPendingStart = false;
-  hideStartMenu();
-  startNewMatch({
-    playMode: "friend",
-    friendFlow: "hybrid",
-    forceDealerPlayerIndex: 0,
-    forceCurrentPlayerIndex: 0,
-  });
-  enforceInitialOnlineStartupState("begin-online-friend-match");
-  if (state.rtcRole === "guest") {
-    state.rtcInitSent = false;
-    state.rtcInitApplied = false;
-    state.rtcWaiting = true;
-    setFriendInterstitialOpen(true, state.currentPlayer);
-    setFriendInterstitialStatus(`Connected to room ${state.rtcRoomCode}. Waiting for host initialization.`, false);
-    debugOnlineInit("guest-awaiting-init", {
-      currentTurnOwnerAfterLocalStart: describeTurnOwnerForDebug(state.currentPlayer),
-    });
-  } else {
-    state.rtcInitSent = false;
-    state.rtcInitApplied = true;
-    const hostMessage = `Room ${state.rtcRoomCode} connected. Turn handoffs send automatically.`;
-    state.message = hostMessage;
-    addSystemLog(hostMessage);
-    debugOnlineInit("host-authoritative-startup", {
-      currentTurnOwnerAfterLocalStart: describeTurnOwnerForDebug(state.currentPlayer),
-    });
-    sendHostSessionInitSignal();
-    applyOnlineWaitingStateFromCurrentTurn("host-local-authority");
-  }
-  renderAll();
+  return getOnlineSessionController().beginOnlineFriendMatch();
+}
+
+async function handleOnlineReconnect(roomCode, role) {
+  return getOnlineSessionController().handleOnlineReconnect(roomCode, role);
+}
+
+async function handleRtcDisconnectAutoReconnect() {
+  return getOnlineSessionController().handleRtcDisconnectAutoReconnect();
+}
+
+function clearOnlineRealtimeSubscriptions() {
+  return getOnlineSessionController().clearOnlineRealtimeSubscriptions();
+}
+
+async function handleRtcReconnectRetry() {
+  return getOnlineSessionController().handleRtcDisconnectAutoReconnect();
+}
+
+async function attemptOnlineResumeOnLoad() {
+  return getOnlineStartController().attemptOnlineResumeOnLoad();
+}
+
+function refreshStartMenuAsyncUx() {
+  return getOnlineStartController().refreshStartMenuAsyncUx();
 }
 
 function renderRtcStatusBadge() {
-  if (!ui.rtcStatusBadge || !ui.rtcStatusText) return;
-  const visible = Boolean(
-    state.rtcRole ||
-      state.rtcPendingStart ||
-      state.rtcStatus === "connecting" ||
-      state.rtcStatus === "connected" ||
-      state.rtcStatus === "disconnected" ||
-      state.rtcStatus === "error"
-  );
-  ui.rtcStatusBadge.hidden = !visible;
-  if (!visible) return;
-  const normalizedStatus =
-    state.rtcStatus === "connecting" ||
-    state.rtcStatus === "connected" ||
-    state.rtcStatus === "disconnected" ||
-    state.rtcStatus === "error"
-      ? state.rtcStatus
-      : "idle";
-  const roleText = state.rtcRole === "host" ? "Host" : state.rtcRole === "guest" ? "Guest" : "Online";
-  const statusText =
-    normalizedStatus === "connected"
-      ? "Connected"
-      : normalizedStatus === "connecting"
-        ? "Connecting"
-        : normalizedStatus === "disconnected"
-          ? "Disconnected"
-          : normalizedStatus === "error"
-            ? "Error"
-            : "Offline";
-  const roomText = state.rtcRoomCode ? ` (${state.rtcRoomCode})` : "";
-  ui.rtcStatusText.textContent = `${roleText}: ${statusText}${roomText}`;
-  ui.rtcStatusBadge.classList.remove("is-idle", "is-connecting", "is-connected", "is-disconnected", "is-error");
-  ui.rtcStatusBadge.classList.add(`is-${normalizedStatus}`);
-  ui.rtcStatusBadge.classList.toggle("pulse", Boolean(state.rtcHeartbeatPulse));
+  return getOnlineStartController().renderRtcStatusBadge();
 }
 
 function cacheUI() {
@@ -954,6 +837,8 @@ function cacheUI() {
   ui.rtcStatusBadge = document.getElementById("rtc-status-badge");
   ui.rtcStatusDot = document.getElementById("rtc-status-dot");
   ui.rtcStatusText = document.getElementById("rtc-status-text");
+  ui.onlineRoomChip = document.getElementById("online-room-chip");
+  ui.onlineLeaveBtn = document.getElementById("online-leave-btn");
   ui.gameSummaryToggle = document.getElementById("game-summary-toggle");
   ui.gameSummaryPanel = document.getElementById("game-summary-panel");
   ui.roundSummaryBody = document.getElementById("round-summary-body");
@@ -1009,6 +894,13 @@ function cacheUI() {
   ui.startModeFriendBtn = document.getElementById("start-mode-friend-btn");
   ui.startModeOnlineBtn = document.getElementById("start-mode-online-btn");
   ui.startSubtitle = document.getElementById("start-subtitle");
+  ui.startExpiredNote = document.getElementById("start-expired-note");
+  ui.startExpiredNoteText = document.getElementById("start-expired-note-text");
+  ui.startExpiredNoteClose = document.getElementById("start-expired-note-close");
+  ui.startResumeCard = document.getElementById("start-resume-card");
+  ui.startResumeText = document.getElementById("start-resume-text");
+  ui.startResumeBtn = document.getElementById("start-resume-btn");
+  ui.startResumeLeaveBtn = document.getElementById("start-resume-leave-btn");
   ui.startOnlinePanel = document.getElementById("start-online-panel");
   ui.onlineHostBtn = document.getElementById("online-host-btn");
   ui.onlineJoinBtn = document.getElementById("online-join-btn");
@@ -1017,6 +909,9 @@ function cacheUI() {
   ui.onlineRoomCodeInput = document.getElementById("online-room-code-input");
   ui.onlineRoomDisplay = document.getElementById("online-room-display");
   ui.onlineRoomCodeText = document.getElementById("online-room-code-text");
+  ui.onlineBookmarkPrompt = document.getElementById("online-bookmark-prompt");
+  ui.onlineBookmarkCopyBtn = document.getElementById("online-bookmark-copy-btn");
+  ui.onlineBookmarkDismissBtn = document.getElementById("online-bookmark-dismiss-btn");
   ui.startOnlineStatus = document.getElementById("start-online-status");
   ui.startLoadActions = document.getElementById("start-load-actions");
   ui.startLoadBtn = document.getElementById("start-load-btn");
@@ -1045,6 +940,7 @@ function bindUI() {
   ui.drawPreview?.addEventListener("click", onDrawPreviewClick);
   ui.contextZone.addEventListener("click", onContextActionClick);
   ui.gameSummaryToggle?.addEventListener("click", onToggleGameSummaryPanel);
+  ui.onlineLeaveBtn?.addEventListener("click", onFriendBackToMenu);
   ui.logToggle?.addEventListener("click", onToggleLogPanel);
   ui.codeToggle?.addEventListener("click", onToggleCodePanel);
   ui.copyLinkBtn?.addEventListener("click", onCopyLink);
@@ -1059,9 +955,15 @@ function bindUI() {
   ui.startModeCpuBtn?.addEventListener("click", onStartModeCpuFromMenu);
   ui.startModeFriendBtn?.addEventListener("click", onStartModeFriendFromMenu);
   ui.startModeOnlineBtn?.addEventListener("click", onStartModeOnlineFromMenu);
+  ui.startExpiredNoteClose?.addEventListener("click", onStartExpiredNoteDismiss);
+  ui.startResumeBtn?.addEventListener("click", onStartResumeFromCard);
+  ui.startResumeLeaveBtn?.addEventListener("click", onStartResumeLeaveFromCard);
   ui.onlineHostBtn?.addEventListener("click", onOnlineHostFromMenu);
   ui.onlineJoinBtn?.addEventListener("click", onOnlineJoinFromMenu);
   ui.onlineBackBtn?.addEventListener("click", onOnlineBackFromMenu);
+  ui.onlineBookmarkCopyBtn?.addEventListener("click", onOnlineBookmarkCopyUrl);
+  ui.onlineBookmarkDismissBtn?.addEventListener("click", onOnlineBookmarkDismiss);
+  ui.onlineRoomChip?.addEventListener("click", onOnlineRoomChipCopy);
   ui.onlineRoomCodeInput?.addEventListener("input", () => {
     if (!ui.onlineRoomCodeInput) return;
     ui.onlineRoomCodeInput.value = normalizeRoomCodeInput(ui.onlineRoomCodeInput.value);
@@ -1106,6 +1008,10 @@ function showStartMenu() {
   setGameSummaryPanelOpen(false);
   setCodePanelOpen(false);
   setCodeStatus("", false, "start");
+  if (document.title !== "Koi-Koi") {
+    document.title = "Koi-Koi";
+  }
+  refreshStartMenuAsyncUx();
 }
 
 function hideStartMenu() {
@@ -1358,251 +1264,79 @@ function onStartModeFriendFromMenu() {
 }
 
 async function onStartModeOnlineFromMenu() {
-  if (!state.ready) return;
-  setStartOnlinePanelOpen(true);
-  setStartOnlinePanelMode("host");
-  const rtc = getRtcBridge();
-  if (!rtc || typeof rtc.hostRoom !== "function" || typeof rtc.joinRoom !== "function") {
-    setStartOnlineStatus("Online mode unavailable: RTC bridge not loaded.", true);
-    return;
-  }
-  if (!ensureOnlineAuthReadyForStart()) return;
-  setStartOnlineStatus("Tap Host New Room to create and share a room code, or tap Join Room to switch to code entry.", false);
+  return getOnlineStartController().onStartModeOnlineFromMenu();
 }
 
 async function onOnlineHostFromMenu() {
-  setStartOnlinePanelMode("host");
-  await startOnlineSession("host");
+  return getOnlineStartController().onOnlineHostFromMenu();
 }
 
 async function onOnlineJoinFromMenu() {
-  if (state.startOnlineMode !== "join") {
-    resetRtcSession({ closeConnection: true });
-    setStartOnlinePanelMode("join");
-    setStartOnlineStatus("Enter your friend's room code, then tap Join Room again.", false);
-    return;
-  }
-  await startOnlineSession("guest");
+  return getOnlineStartController().onOnlineJoinFromMenu();
 }
 
 function onOnlineBackFromMenu() {
-  resetRtcSession({ closeConnection: true });
-  setStartOnlinePanelOpen(false);
+  return getOnlineStartController().onOnlineBackFromMenu();
+}
+
+function onStartExpiredNoteDismiss() {
+  return getOnlineStartController().dismissStartExpiredNote();
+}
+
+async function onStartResumeFromCard() {
+  return getOnlineStartController().onStartResumeFromCard();
+}
+
+async function onStartResumeLeaveFromCard() {
+  return getOnlineStartController().onStartResumeLeaveFromCard();
+}
+
+async function onOnlineBookmarkCopyUrl() {
+  return getOnlineStartController().onOnlineBookmarkCopyUrl();
+}
+
+function onOnlineBookmarkDismiss() {
+  return getOnlineStartController().onOnlineBookmarkDismiss();
 }
 
 async function startOnlineSession(role) {
-  const rtc = getRtcBridge();
-  if (!rtc || typeof rtc.hostRoom !== "function" || typeof rtc.joinRoom !== "function") {
-    setStartOnlineStatus("Online mode unavailable: RTC bridge not loaded.", true);
-    return;
-  }
-  if (!ensureOnlineAuthReadyForStart()) return;
-  const joinRoomCode = normalizeRoomCodeInput(ui.onlineRoomCodeInput?.value || "");
-  setStartOnlinePanelMode(role === "host" ? "host" : "join");
-  if (role === "guest" && ui.onlineRoomCodeInput) {
-    ui.onlineRoomCodeInput.value = joinRoomCode;
-  }
-  if (role === "guest") {
-    if (!joinRoomCode) {
-      setStartOnlineStatus("Enter a room code to join.", true);
-      return;
-    }
-    if (!ONLINE_ROOM_CODE_REGEX.test(joinRoomCode)) {
-      setStartOnlineStatus(`Room code must be exactly ${ONLINE_ROOM_CODE_LENGTH} uppercase letters/numbers.`, true);
-      return;
-    }
-  }
-
-  const maxAttempts = role === "host" ? ONLINE_HOST_CREATE_MAX_ATTEMPTS : 1;
-  let attempt = 0;
-  let lastError = null;
-
-  while (attempt < maxAttempts) {
-    attempt += 1;
-    const roomCode = role === "host" ? String(rtc.createRoomCode?.() || "") : joinRoomCode;
-    if (!ONLINE_ROOM_CODE_REGEX.test(roomCode)) {
-      if (role === "host") {
-        lastError = new Error("Could not create a valid room code. Try again.");
-        continue;
-      }
-      setStartOnlineStatus(`Room code must be exactly ${ONLINE_ROOM_CODE_LENGTH} uppercase letters/numbers.`, true);
-      return;
-    }
-
-    setStartOnlinePanelOpen(true);
-    setStartOnlineRoomDisplay(roomCode);
-    setStartOnlineStatus(
-      role === "host" ? `Creating room ${roomCode}...` : `Joining room ${roomCode}...`,
-      false
-    );
-
-    try {
-      debugOnlineInit("start-online-session-request", {
-        requestedRole: role,
-        currentTurnOwnerBeforeConnect: describeTurnOwnerForDebug(state.currentPlayer),
-      });
-      resetRtcSession({ closeConnection: true });
-      state.rtcRole = role;
-      state.rtcRoomCode = roomCode;
-      state.rtcPendingStart = true;
-      state.rtcWaiting = false;
-      state.rtcInitSent = false;
-      state.rtcInitApplied = false;
-      debugOnlineInit("start-online-session-role-assigned", {
-        requestedRole: role,
-        currentTurnOwnerBeforeConnect: describeTurnOwnerForDebug(state.currentPlayer),
-      });
-      setStartOnlineRoomDisplay(roomCode);
-      if (role === "host") {
-        await rtc.hostRoom(roomCode, onRtcReceiveTurnCode);
-      } else {
-        await rtc.joinRoom(roomCode, onRtcReceiveTurnCode);
-      }
-      state.rtcStatus = String(rtc.getStatus?.() || "connecting");
-      if (role === "host") {
-        setStartOnlineStatus(`Room ${roomCode} ready. Waiting for your friend to connect...`, false);
-        try {
-          if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(roomCode);
-          }
-        } catch (_err) {
-          // Best-effort copy only.
-        }
-      } else {
-        setStartOnlineStatus(`Room ${roomCode} joined. Finalizing peer connection...`, false);
-      }
-      renderAll();
-      return;
-    } catch (err) {
-      lastError = err;
-      if (role === "host" && isOnlineRoomCodeCollisionError(err) && attempt < maxAttempts) {
-        continue;
-      }
-      break;
-    }
-  }
-
-  resetRtcSession({ closeConnection: true });
-  setStartOnlinePanelOpen(true);
-  if (role === "host" && isOnlineRoomCodeCollisionError(lastError)) {
-    setStartOnlineStatus("Could not create a new online room right now. Please try again.", true);
-    return;
-  }
-  setStartOnlineStatus(`Online setup failed: ${lastError?.message || "unknown error"}`, true);
+  return getOnlineStartController().startOnlineSession(role);
 }
 
 function onRtcReceiveTurnCode(rawPayload) {
-  if (state.rtcPendingStart) {
-    beginOnlineFriendMatch();
-  }
-  let signal = null;
+  return getOnlineStartController().onRtcReceiveTurnCode(rawPayload);
+}
+
+async function onOnlineRoomChipCopy() {
+  const code = String(state.rtcRoomCode || "").trim().toUpperCase();
+  if (!code) return;
   try {
-    signal = tryDecodeRtcSignal(rawPayload);
-  } catch (err) {
-    setFriendInterstitialOpen(true, state.currentPlayer);
-    setFriendInterstitialStatus(`Incoming online signal failed: ${err.message}`, true);
-    renderAll();
-    return;
-  }
-  if (signal) {
-    try {
-      handleIncomingRtcSignal(signal);
-    } catch (err) {
-      setFriendInterstitialOpen(true, state.currentPlayer);
-      setFriendInterstitialStatus(`Incoming online signal failed: ${err.message}`, true);
-      renderAll();
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(code);
+      return;
     }
-    return;
+  } catch (_err) {
+    // Fall back to execCommand path.
   }
-  state.rtcWaiting = false;
-  const loaded = loadCodeIntoGame(rawPayload, "friend", { allowNonCheckpointFriendImport: true });
-  if (!loaded) {
-    setFriendInterstitialOpen(true, state.currentPlayer);
-    setFriendInterstitialStatus("Incoming online handoff failed. Ask your friend to share a turn link.", true);
-    renderAll();
-    return;
-  }
-  setFriendInterstitialStatus("", false);
-  applyOnlineWaitingStateFromCurrentTurn("raw-turn-code");
+  const temp = document.createElement("textarea");
+  temp.value = code;
+  temp.setAttribute("readonly", "true");
+  temp.style.position = "fixed";
+  temp.style.opacity = "0";
+  document.body.appendChild(temp);
+  temp.focus();
+  temp.select();
+  document.execCommand("copy");
+  temp.setSelectionRange(0, 0);
+  document.body.removeChild(temp);
 }
 
 function handleIncomingRtcSignal(signal) {
-  if (!signal || typeof signal !== "object") return;
-  const type = String(signal.type || "");
-  if (type === "session-init") {
-    const code = typeof signal.code === "string" ? signal.code : "";
-    if (!code) {
-      throw new Error("session-init missing code payload");
-    }
-    debugOnlineInit("guest-session-init-received", {
-      currentTurnOwnerBeforeInit: describeTurnOwnerForDebug(state.currentPlayer),
-      payloadTurnOwner:
-        signal.currentTurnOwner === 0 || signal.currentTurnOwner === 1
-          ? describeTurnOwnerForDebug(signal.currentTurnOwner)
-          : "unknown",
-    });
-    const loaded = loadCodeIntoGame(code, "friend", { allowNonCheckpointFriendImport: true });
-    if (!loaded) {
-      setFriendInterstitialOpen(true, state.currentPlayer);
-      setFriendInterstitialStatus("Initial sync failed. Ask host to resend a turn link.", true);
-      renderAll();
-      return;
-    }
-    enforceInitialOnlineStartupState("guest-session-init-apply");
-    state.rtcInitApplied = true;
-    applyOnlineWaitingStateFromCurrentTurn("session-init");
-    debugOnlineInit(
-      "guest-session-init-applied",
-      getOnlineStartupDebugState({ currentTurnOwnerAfterInit: describeTurnOwnerForDebug(state.currentPlayer) })
-    );
-    return;
-  }
-  if (type === "turn-code") {
-    const code = typeof signal.code === "string" ? signal.code : "";
-    const loaded = loadCodeIntoGame(code, "friend", { allowNonCheckpointFriendImport: true });
-    if (!loaded) {
-      setFriendInterstitialOpen(true, state.currentPlayer);
-      setFriendInterstitialStatus("Incoming online turn sync failed. Ask your friend to share a turn link.", true);
-      renderAll();
-      return;
-    }
-    setFriendInterstitialStatus("", false);
-    applyOnlineWaitingStateFromCurrentTurn("signal-turn-code");
-    return;
-  }
-  if (type === "round-ready") {
-    const playerIndex = asNullablePlayerIndex(signal.playerIndex, "rtc.round-ready.playerIndex");
-    const gameNumber = signal.gameNumber === undefined ? null : asInt(signal.gameNumber, "rtc.round-ready.gameNumber");
-    const nextGameNumber =
-      signal.nextGameNumber === undefined || signal.nextGameNumber === null
-        ? null
-        : asInt(signal.nextGameNumber, "rtc.round-ready.nextGameNumber");
-    if (!state.roundTransition?.open || !state.roundOver || state.matchOver) return;
-    if (gameNumber !== null && gameNumber !== state.gameNumber) return;
-    if (
-      nextGameNumber !== null &&
-      state.roundTransition.nextGameNumber !== null &&
-      nextGameNumber !== state.roundTransition.nextGameNumber
-    ) {
-      return;
-    }
-    if (playerIndex === 0 || playerIndex === 1) {
-      if (playerIndex === 0) state.roundTransition.acks.p0 = true;
-      if (playerIndex === 1) state.roundTransition.acks.p1 = true;
-      const readyName = state.players[playerIndex]?.name || `P${playerIndex + 1}`;
-      setFriendInterstitialStatus(`${readyName} is ready for the next game.`, false);
-    }
-    if (isRoundTransitionReadyForAdvance()) {
-      onNextGame();
-      return;
-    }
-    renderAll();
-    return;
-  }
+  return getOnlineSessionController().handleIncomingRtcSignal(signal);
 }
 
 function onStartLoadFromMenu() {
-  tryLoadFromClipboardOrManual("start");
+  return getCodeIoController().onStartLoadFromMenu();
 }
 
 function setCodeStatus(message, isError, target = "panel") {
@@ -1614,178 +1348,48 @@ function setCodeStatus(message, isError, target = "panel") {
 }
 
 function setFriendInterstitialStatus(message, isError) {
-  setCodeStatus(message, isError, "friend");
+  return getOnlineHandoffController().setFriendInterstitialStatus(message, isError);
 }
 
 function setFriendInterstitialOpen(open, nextPlayerIndex = null) {
-  const shouldOpen = Boolean(open);
-  const normalizedNext =
-    shouldOpen && nextPlayerIndex !== null && nextPlayerIndex !== undefined
-      ? asPlayerIndex(nextPlayerIndex, "interstitial.nextPlayerIndex")
-      : null;
-  state.interstitial = {
-    open: shouldOpen,
-    nextPlayerIndex: shouldOpen ? (normalizedNext === null ? state.currentPlayer : normalizedNext) : null,
-  };
-  if (!shouldOpen) {
-    setFriendInterstitialStatus("", false);
-    setFriendManualLoadVisible(false);
-    if (ui.friendImportCode) ui.friendImportCode.value = "";
-  }
+  return getOnlineHandoffController().setFriendInterstitialOpen(open, nextPlayerIndex);
 }
 
 function onFriendInterstitialLoadCode() {
-  tryLoadFromClipboardOrManual("friend");
+  return getOnlineHandoffController().onFriendInterstitialLoadCode();
 }
 
 async function readClipboardTextSafe() {
-  if (!navigator.clipboard?.readText) {
-    throw new Error("Clipboard access unavailable");
-  }
-  const text = await navigator.clipboard.readText();
-  return String(text || "").trim();
+  return getCodeIoController().readClipboardTextSafe();
 }
 
 async function tryLoadFromClipboardOrManual(target) {
-  const isStart = target === "start";
-  const inputEl = isStart ? ui.startImportCode : ui.friendImportCode;
-  const fallbackOpen = isStart ? state.manualLoadFallback.start : state.manualLoadFallback.friend;
-  const manualRaw = String(inputEl?.value || "").trim();
-
-  if (fallbackOpen && manualRaw) {
-    loadCodeIntoGame(manualRaw, target);
-    return;
-  }
-
-  try {
-    const clipboardText = await readClipboardTextSafe();
-    if (!clipboardText) {
-      throw new Error("Clipboard is empty");
-    }
-    const loaded = loadCodeIntoGame(clipboardText, target);
-    if (loaded) return;
-    if (isStart) {
-      setStartManualLoadVisible(true);
-    } else {
-      setFriendManualLoadVisible(true);
-    }
-    setCodeStatus("Clipboard content did not load. Paste a turn link or code below.", true, target);
-  } catch (err) {
-    if (isStart) {
-      setStartManualLoadVisible(true);
-    } else {
-      setFriendManualLoadVisible(true);
-    }
-    const fallbackMessage =
-      err && err.message === "Clipboard is empty"
-        ? "No clipboard link found. Paste a turn link or code below."
-        : "Clipboard unavailable. Paste a turn link or code below.";
-    setCodeStatus(fallbackMessage, true, target);
-  }
+  return getCodeIoController().tryLoadFromClipboardOrManual(target);
 }
 
 function prepareFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex) {
-  if (!isFriendMode()) return;
-  if (Number.isFinite(lastActorIndex) && Number.isFinite(moveNumber)) {
-    state.lastExportMeta = {
-      turnNumber: Math.max(1, Number(moveNumber)),
-      playerIndex: asPlayerIndex(lastActorIndex, "lastExportMeta.playerIndex"),
-    };
-  }
-  setFriendInterstitialOpen(true, nextPlayerIndex);
+  return getOnlineHandoffController().prepareFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex);
 }
 
 function dispatchFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex) {
-  prepareFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex);
-  if (!isOnlineFriendSessionActive()) {
-    state.rtcWaiting = false;
-    return;
-  }
-
-  const rtc = getRtcBridge();
-  if (!rtc || typeof rtc.sendTurnCode !== "function") {
-    setFriendInterstitialStatus("Online transport unavailable. Use Copy Turn Link.", true);
-    state.rtcWaiting = false;
-    return;
-  }
-
-  if (state.rtcStatus !== "connected") {
-    setFriendInterstitialStatus("Peer not connected yet. Use Copy Turn Link or wait.", true);
-    state.rtcWaiting = false;
-    return;
-  }
-
-  let code = "";
-  try {
-    code = encodeStateToCode();
-  } catch (err) {
-    setFriendInterstitialStatus(`Could not send turn: ${err.message}`, true);
-    state.rtcWaiting = false;
-    return;
-  }
-  const sent = rtc.sendTurnCode(code);
-  if (!sent) {
-    setFriendInterstitialStatus("Automatic send failed. Use Copy Turn Link.", true);
-    state.rtcWaiting = false;
-    return;
-  }
-  state.rtcWaiting = true;
-  setFriendInterstitialStatus(`Turn sent automatically (room ${state.rtcRoomCode}).`, false);
+  return getOnlineHandoffController().dispatchFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex);
 }
 
 async function onFriendInterstitialCopyCode() {
-  if (!isFriendMode() || !state.interstitial?.open) return;
-  let link = "";
-  try {
-    link = buildShareLinkFromCode(encodeStateToCode());
-  } catch (err) {
-    setFriendInterstitialStatus(`Could not generate link: ${err.message}`, true);
-    return;
-  }
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(link);
-    } else {
-      const temp = document.createElement("textarea");
-      temp.value = link;
-      temp.setAttribute("readonly", "true");
-      temp.style.position = "fixed";
-      temp.style.opacity = "0";
-      document.body.appendChild(temp);
-      temp.focus();
-      temp.select();
-      document.execCommand("copy");
-      temp.setSelectionRange(0, 0);
-      document.body.removeChild(temp);
-    }
-    setFriendInterstitialStatus("Turn link copied.", false);
-  } catch (err) {
-    setFriendInterstitialStatus(`Copy failed: ${err.message}`, true);
-  }
+  return getOnlineHandoffController().onFriendInterstitialCopyCode();
 }
 
 function onFriendInterstitialContinue() {
-  if (!isFriendMode() || !state.interstitial?.open) return;
-  if (state.rtcWaiting) return;
-  if (isOnlineFriendSessionActive() && (state.rtcStatus === "disconnected" || state.rtcStatus === "error")) return;
-  const nextPlayerIndex =
-    state.interstitial.nextPlayerIndex === null || state.interstitial.nextPlayerIndex === undefined
-      ? state.currentPlayer
-      : state.interstitial.nextPlayerIndex;
-  state.viewerPlayerIndex = nextPlayerIndex;
-  setFriendInterstitialOpen(false);
-  playTurnRecapForViewer();
-  renderAll();
+  return getOnlineHandoffController().onFriendInterstitialContinue();
 }
 
 function onFriendBackToMenu() {
-  resetRtcSession({ closeConnection: true });
-  setFriendInterstitialOpen(false);
-  showStartMenu();
+  return getOnlineHandoffController().onFriendBackToMenu();
 }
 
 function loadCodeIntoGame(rawInput, target = "panel", options = {}) {
   const allowNonCheckpointFriendImport = Boolean(options.allowNonCheckpointFriendImport);
+  const allowMissingDrawPile = Boolean(options.allowMissingDrawPile);
   const normalized = extractCodeFromInput(rawInput);
   if (!normalized) {
     setCodeStatus("Paste a link or code first.", true, target);
@@ -1793,14 +1397,14 @@ function loadCodeIntoGame(rawInput, target = "panel", options = {}) {
   }
 
   try {
-    const snapshot = decodeGameCode(normalized);
+    const snapshot = decodeGameCode(normalized, { allowMissingDrawPile });
     if (target === "friend" && snapshot.playMode !== "friend") {
       throw new Error("This is not a friend turn link");
     }
     if (target === "friend" && !allowNonCheckpointFriendImport) {
       validateFriendCodeSnapshotForImport(snapshot);
     }
-    applySnapshot(snapshot);
+    applySnapshot(snapshot, { allowMissingDrawPile });
     state.rtcWaiting = false;
     hideStartMenu();
     setCodePanelOpen(false);
@@ -1880,7 +1484,7 @@ function encodeStateToCode() {
   return `${SAVE_CODE_PREFIX}.${payload}.${checksum}`;
 }
 
-function decodeGameCode(code) {
+function decodeGameCode(code, options = {}) {
   const normalized = String(code || "").trim();
   const parts = normalized.split(".");
   if (parts.length !== 3) {
@@ -1912,7 +1516,7 @@ function decodeGameCode(code) {
   }
 
   const migrated = migrateSnapshotToLatest(parsed);
-  validateSnapshot(migrated);
+  validateSnapshot(migrated, options);
   return migrated;
 }
 
@@ -2132,7 +1736,8 @@ function serializeRoundTransition(roundTransition) {
   };
 }
 
-function validateSnapshot(snapshot) {
+function validateSnapshot(snapshot, options = {}) {
+  const allowMissingDrawPile = Boolean(options.allowMissingDrawPile);
   if (!snapshot || typeof snapshot !== "object") {
     throw new Error("Snapshot must be an object");
   }
@@ -2158,8 +1763,14 @@ function validateSnapshot(snapshot) {
   if (!Array.isArray(snapshot.players) || snapshot.players.length !== 2) {
     throw new Error("Snapshot must contain exactly two players");
   }
-  if (!Array.isArray(snapshot.field) || !Array.isArray(snapshot.drawPile)) {
-    throw new Error("Snapshot must include field and draw pile arrays");
+  if (!Array.isArray(snapshot.field)) {
+    throw new Error("Snapshot must include a field array");
+  }
+  if (!allowMissingDrawPile && !Array.isArray(snapshot.drawPile)) {
+    throw new Error("Snapshot must include a draw pile array");
+  }
+  if (allowMissingDrawPile && snapshot.drawPile !== undefined && snapshot.drawPile !== null && !Array.isArray(snapshot.drawPile)) {
+    throw new Error("Snapshot draw pile must be an array when present");
   }
   if (!Array.isArray(snapshot.moveCounts) || snapshot.moveCounts.length !== 2) {
     throw new Error("Snapshot moveCounts must have two entries");
@@ -2197,7 +1808,9 @@ function validateSnapshot(snapshot) {
 
   // Force card-id validity here and duplicate checks in applySnapshot.
   snapshot.field.forEach((id, idx) => ensureCardId(id, `field[${idx}]`));
-  snapshot.drawPile.forEach((id, idx) => ensureCardId(id, `drawPile[${idx}]`));
+  if (Array.isArray(snapshot.drawPile)) {
+    snapshot.drawPile.forEach((id, idx) => ensureCardId(id, `drawPile[${idx}]`));
+  }
   snapshot.players.forEach((player, playerIndex) => {
     if (!player || typeof player !== "object") {
       throw new Error(`players[${playerIndex}] must be an object`);
@@ -2375,7 +1988,32 @@ function validateAwaitingDecisionSnapshot(decision) {
   asInt(decision.koiMultiplier, "awaitingDecision.koiMultiplier");
 }
 
-function applySnapshot(snapshot) {
+function rebuildDrawPileFromPriorIds(previousDrawPileIds, snapshot) {
+  const claimedIds = new Set();
+  state.field.forEach((card) => claimedIds.add(card.id));
+  state.players.forEach((player) => {
+    player.hand.forEach((card) => claimedIds.add(card.id));
+    player.captured.forEach((card) => claimedIds.add(card.id));
+  });
+
+  if (snapshot?.pendingSelection && typeof snapshot.pendingSelection === "object") {
+    const pendingType = String(snapshot.pendingSelection.type || "");
+    if ((pendingType === "drawMatch" || pendingType === "drawPlace") && snapshot.pendingSelection.drawnCardId) {
+      claimedIds.add(String(snapshot.pendingSelection.drawnCardId));
+    }
+  }
+  if (snapshot?.awaitingDeckFlip && typeof snapshot.awaitingDeckFlip === "object" && snapshot.awaitingDeckFlip.drawnCardId) {
+    claimedIds.add(String(snapshot.awaitingDeckFlip.drawnCardId));
+  }
+
+  return previousDrawPileIds
+    .filter((cardId) => !claimedIds.has(cardId))
+    .map((cardId, index) => cardByIdOrThrow(cardId, `drawPile[reconstructed][${index}]`));
+}
+
+function applySnapshot(snapshot, options = {}) {
+  const allowMissingDrawPile = Boolean(options.allowMissingDrawPile);
+  const previousDrawPileIds = Array.isArray(state.drawPile) ? state.drawPile.map((card) => card.id) : [];
   clearRoundRuntimeTimers({
     resetTurnReplayVisual: false,
     resetDrawPreviewFxState: true,
@@ -2452,7 +2090,13 @@ function applySnapshot(snapshot) {
   }
 
   state.field = cardIdsToCards(snapshot.field, "field");
-  state.drawPile = cardIdsToCards(snapshot.drawPile, "drawPile");
+  if (Array.isArray(snapshot.drawPile)) {
+    state.drawPile = cardIdsToCards(snapshot.drawPile, "drawPile");
+  } else if (allowMissingDrawPile) {
+    state.drawPile = rebuildDrawPileFromPriorIds(previousDrawPileIds, snapshot);
+  } else {
+    state.drawPile = cardIdsToCards(snapshot.drawPile, "drawPile");
+  }
   state.moveCounts = [
     Math.max(0, asInt(snapshot.moveCounts[0], "moveCounts[0]")),
     Math.max(0, asInt(snapshot.moveCounts[1], "moveCounts[1]")),
@@ -3331,7 +2975,7 @@ function getCpuPlayerIndex() {
 }
 
 function isFriendCodeMode() {
-  return isFriendMode();
+  return isFriendMode() && !isOnlineFriendSessionActive();
 }
 
 function isFriendTurnExportWindow() {
@@ -4388,7 +4032,7 @@ function markRoundTransitionReady(playerIndex = null) {
       nextGameNumber: state.roundTransition.nextGameNumber,
     });
     if (!sent) {
-      setFriendInterstitialStatus("Could not sync Ready signal. Use Copy Turn Link / Load Turn Link fallback.", true);
+      setFriendInterstitialStatus("Could not sync Ready signal. Try reconnecting or return to menu.", true);
       renderAll();
       return;
     }
@@ -4450,7 +4094,7 @@ function endRoundDraw() {
       noScore: true,
     });
     if (!syncOnlineRoundTransitionSnapshot() && isOnlineFriendSessionActive()) {
-      addSystemLog("Round-end sync failed online. Share a turn link manually.");
+      addSystemLog("Round-end sync failed online. Waiting for automatic retry.");
     }
     const nextMonth = describeMonthNameOnly(state.roundTransition.nextGameNumber);
     state.message = `Game End: No scorer. Next Game: ${nextMonth}.`;
@@ -4513,7 +4157,7 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
       noScore: false,
     });
     if (!syncOnlineRoundTransitionSnapshot() && isOnlineFriendSessionActive()) {
-      addSystemLog("Round-end sync failed online. Share a turn link manually.");
+      addSystemLog("Round-end sync failed online. Waiting for automatic retry.");
     }
     const nextMonth = describeMonthNameOnly(state.roundTransition.nextGameNumber);
     state.message = `Game End: ${winner.name} wins ${scored}. Next Game: ${nextMonth}.`;
@@ -4524,6 +4168,9 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
 }
 
 function applyFinalMessage() {
+  if (state.rtcRole && state.rtcRoomCode) {
+    clearOnlineSessionContext();
+  }
   const p0 = state.players[0].score;
   const p1 = state.players[1].score;
   const p0Name = state.players[0].name;
@@ -4809,6 +4456,7 @@ function computeYaku(captured, roundMonth) {
 
 function renderAll() {
   state.turnCheckpointReady = computeTurnCheckpointReady();
+  renderDocumentTitleAndOnlineRoomChip();
   renderRtcStatusBadge();
   if (!Array.isArray(state.players) || state.players.length < 2 || !state.players[0] || !state.players[1]) {
     state.autoFocusTargetKey = null;
@@ -4838,6 +4486,24 @@ function renderAll() {
     }
   }
   focusActiveActionTarget();
+}
+
+function renderDocumentTitleAndOnlineRoomChip() {
+  let nextTitle = "Koi-Koi";
+  if (isOnlineFriendSessionActive()) {
+    const localPlayerIndex = getOnlineLocalPlayerIndex();
+    const turnOwner = state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : null;
+    const waiting = state.rtcWaiting || localPlayerIndex === null || turnOwner === null || localPlayerIndex !== turnOwner;
+    nextTitle = waiting ? "Waiting - Koi-Koi" : "Your turn - Koi-Koi";
+  }
+  if (document.title !== nextTitle) {
+    document.title = nextTitle;
+  }
+  if (!ui.onlineRoomChip) return;
+  const showRoomChip = isOnlineFriendSessionActive() && Boolean(state.rtcRoomCode);
+  ui.onlineRoomChip.hidden = !showRoomChip;
+  if (!showRoomChip) return;
+  ui.onlineRoomChip.textContent = `Room ${state.rtcRoomCode} | Copy`;
 }
 
 function renderCodePanel() {
@@ -4910,7 +4576,11 @@ function renderFriendInterstitial() {
     const moveText = state.lastExportMeta
       ? ` (${previousName} move ${state.lastExportMeta.turnNumber})`
       : "";
-    ui.friendInterstitialText.textContent = `${previousName}'s turn is complete${moveText}. Pass the phone, or copy a turn link and continue asynchronously.`;
+    if (isOnlineFriendSessionActive()) {
+      ui.friendInterstitialText.textContent = `${previousName}'s turn is complete${moveText}. Online sync is automatic.`;
+    } else {
+      ui.friendInterstitialText.textContent = `${previousName}'s turn is complete${moveText}. Pass the phone, or copy a turn link and continue asynchronously.`;
+    }
   }
   if (ui.friendContinueBtn) {
     ui.friendContinueBtn.hidden = false;
@@ -4918,7 +4588,9 @@ function renderFriendInterstitial() {
     ui.friendContinueBtn.textContent = `${nextName} Ready`;
   }
   if (ui.friendImportCode) {
-    ui.friendImportCode.placeholder = "Paste turn link or code from other player";
+    ui.friendImportCode.placeholder = isOnlineFriendSessionActive()
+      ? "Online room sync is automatic."
+      : "Paste turn link or code from other player";
   }
   if (ui.friendCopyCodeBtn) {
     ui.friendCopyCodeBtn.hidden = false;
@@ -4936,33 +4608,66 @@ function renderFriendInterstitial() {
   if (ui.friendManualLoadWrap) {
     ui.friendManualLoadWrap.hidden = !state.manualLoadFallback.friend;
   }
-  if (recoveryOnline) {
-    const canCopyCheckpoint = isFriendTurnExportWindow();
+  if (state.rtcOpponentAbandoned) {
     if (ui.friendInterstitialTitle) {
-      ui.friendInterstitialTitle.textContent = "Connection Lost";
+      ui.friendInterstitialTitle.textContent = "Opponent Left";
     }
     if (ui.friendInterstitialText) {
-      ui.friendInterstitialText.textContent =
-        "Online link dropped. Copy your checkpoint turn link or load your friend's turn link to continue.";
+      ui.friendInterstitialText.textContent = "Your opponent left this online game. Return to menu to host or join a new room.";
     }
     if (ui.friendContinueBtn) {
       ui.friendContinueBtn.hidden = true;
       ui.friendContinueBtn.disabled = true;
     }
     if (ui.friendLoadCodeBtn) {
-      ui.friendLoadCodeBtn.hidden = false;
-      ui.friendLoadCodeBtn.disabled = false;
-      ui.friendLoadCodeBtn.textContent = "Load Their Code";
+      ui.friendLoadCodeBtn.hidden = true;
+      ui.friendLoadCodeBtn.disabled = true;
     }
     if (ui.friendCopyCodeBtn) {
-      ui.friendCopyCodeBtn.hidden = false;
-      ui.friendCopyCodeBtn.disabled = !canCopyCheckpoint;
-      ui.friendCopyCodeBtn.textContent = "Copy My Turn Code";
+      ui.friendCopyCodeBtn.hidden = true;
+      ui.friendCopyCodeBtn.disabled = true;
     }
     if (ui.friendBackMenuBtn) {
       ui.friendBackMenuBtn.hidden = false;
       ui.friendBackMenuBtn.disabled = false;
-      ui.friendBackMenuBtn.textContent = "Back to Menu";
+      ui.friendBackMenuBtn.textContent = "Return to Menu";
+    }
+    return;
+  }
+  if (recoveryOnline) {
+    const reconnecting = Boolean(state.rtcReconnectInFlight);
+    const reconnectFailed = Boolean(state.rtcReconnectFailed);
+    if (ui.friendInterstitialTitle) {
+      ui.friendInterstitialTitle.textContent = reconnectFailed ? "Could Not Reconnect" : "Connection Lost";
+    }
+    if (ui.friendInterstitialText) {
+      if (reconnecting) {
+        ui.friendInterstitialText.textContent = "Connection lost. Reconnecting...";
+      } else if (reconnectFailed) {
+        ui.friendInterstitialText.textContent =
+          "Could not reconnect automatically. Try reconnect or return to menu.";
+      } else {
+        ui.friendInterstitialText.textContent = "Online link dropped. Reconnect is in progress.";
+      }
+    }
+    if (ui.friendContinueBtn) {
+      ui.friendContinueBtn.hidden = true;
+      ui.friendContinueBtn.disabled = true;
+    }
+    if (ui.friendLoadCodeBtn) {
+      ui.friendLoadCodeBtn.hidden = !reconnectFailed;
+      ui.friendLoadCodeBtn.disabled = reconnecting;
+      ui.friendLoadCodeBtn.textContent = reconnecting ? "Reconnecting..." : "Try Reconnect";
+    }
+    if (ui.friendCopyCodeBtn) {
+      ui.friendCopyCodeBtn.hidden = true;
+      ui.friendCopyCodeBtn.disabled = true;
+    }
+    if (ui.friendManualLoadWrap) ui.friendManualLoadWrap.hidden = true;
+    if (ui.friendBackMenuBtn) {
+      ui.friendBackMenuBtn.hidden = false;
+      ui.friendBackMenuBtn.disabled = false;
+      ui.friendBackMenuBtn.textContent = reconnectFailed ? "Return to Menu" : "Back to Menu";
     }
     return;
   }
@@ -4982,27 +4687,31 @@ function renderFriendInterstitial() {
     }
     if (ui.friendInterstitialText) {
       const roomText = state.rtcRoomCode ? ` Room ${state.rtcRoomCode}.` : "";
-      ui.friendInterstitialText.textContent = `${rtcStatusText}.${roomText} Waiting for opponent turn data.`;
+      const waitingText =
+        state.rtcRemotePresence === false
+          ? "Waiting for opponent to reconnect."
+          : "Waiting for opponent turn data.";
+      ui.friendInterstitialText.textContent = `${rtcStatusText}.${roomText} ${waitingText}`;
     }
     if (ui.friendContinueBtn) {
       ui.friendContinueBtn.hidden = true;
       ui.friendContinueBtn.disabled = true;
     }
     if (ui.friendLoadCodeBtn) {
-      ui.friendLoadCodeBtn.hidden = false;
-      ui.friendLoadCodeBtn.disabled = false;
+      ui.friendLoadCodeBtn.hidden = true;
+      ui.friendLoadCodeBtn.disabled = true;
       ui.friendLoadCodeBtn.textContent = "Load Turn Link";
     }
     if (ui.friendCopyCodeBtn) {
-      const canCopy = state.rtcRole === "host" && isFriendTurnExportWindow();
-      ui.friendCopyCodeBtn.hidden = !canCopy;
-      ui.friendCopyCodeBtn.disabled = !canCopy;
+      ui.friendCopyCodeBtn.hidden = true;
+      ui.friendCopyCodeBtn.disabled = true;
       ui.friendCopyCodeBtn.textContent = "Copy Turn Link";
     }
+    if (ui.friendManualLoadWrap) ui.friendManualLoadWrap.hidden = true;
     if (ui.friendBackMenuBtn) {
       ui.friendBackMenuBtn.hidden = false;
       ui.friendBackMenuBtn.disabled = false;
-      ui.friendBackMenuBtn.textContent = "Back to Menu";
+      ui.friendBackMenuBtn.textContent = state.rtcPresenceTimeoutShown ? "Leave Game" : "Back to Menu";
     }
     return;
   }
@@ -5160,6 +4869,11 @@ function renderTop() {
   if (ui.turnMeta) {
     const turnText = state.roundOver ? "round ended" : state.players[state.currentPlayer].name;
     ui.turnMeta.textContent = `Starts: ${state.players[state.dealer].name} | Turn: ${turnText}`;
+  }
+  if (ui.onlineLeaveBtn) {
+    const showOnlineLeave = isOnlineFriendSessionActive() && !state.matchOver;
+    ui.onlineLeaveBtn.hidden = !showOnlineLeave;
+    ui.onlineLeaveBtn.disabled = !showOnlineLeave;
   }
 
   ui.cpuHandCount.textContent = `${state.players[topPlayerIndex].hand.length} cards`;
