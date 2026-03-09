@@ -72,6 +72,7 @@
     "rtcLastAppliedSnapshotReason",
     "rtcLastAppliedSnapshotAt",
     "startOnlineMode",
+    "onlineHostMovesFirst",
     "onlineAuthState",
     "onlineAuthMessage",
   ];
@@ -197,6 +198,7 @@
       rtcLastAppliedSnapshotReason: "",
       rtcLastAppliedSnapshotAt: 0,
       startOnlineMode: "host",
+      onlineHostMovesFirst: true,
       onlineAuthState: "pending",
       onlineAuthMessage: "Online mode is signing in anonymously...",
     };

@@ -647,6 +647,15 @@ function getOnlineStartController() {
     handleIncomingRtcPayload,
     setFriendInterstitialOpen,
     setFriendInterstitialStatus,
+    startNewMatch,
+    hideStartMenu,
+    encodeStateForOnline,
+    applyOnlineWaitingStateFromCurrentTurn,
+    buildOnlineRoomSummaryFromState,
+    applyOnlineSnapshotFromFirebase,
+    beginOnlineFriendMatch,
+    onPeerConnected,
+    handleOnlineReconnect,
     persistOnlineSessionContext,
     buildOnlineInviteLink,
     normalizeLegacyOnlineUrlToInvite,
@@ -671,6 +680,7 @@ function getOnlineRuntimeController() {
     setStartOnlineStatus,
     setFriendInterstitialStatus,
     beginOnlineFriendMatch,
+    onPeerConnected,
     handleRtcDisconnectAutoReconnect,
     renderAll,
     setStartOnlineRoomDisplay,
@@ -697,10 +707,12 @@ function getOnlineHandoffController() {
     isOnlineFriendSessionActive,
     getRtcBridge,
     encodeStateForOnline,
-    sendOnlineTurnCodeWithSnapshot,
+    getOnlineSnapshotTurnIndex,
+    buildOnlineRoomSummaryFromState,
     handleRtcReconnectRetry,
     encodeStateToCode,
     buildShareLinkFromCode,
+    buildOnlineInviteLink,
     playTurnRecapForViewer,
     renderAll,
     resetRtcSession,
@@ -795,6 +807,22 @@ function sendOnlineTurnCodeWithSnapshot(stateCode, wirePayload, options = {}) {
 
 function syncOnlineRoundTransitionSnapshot() {
   return getOnlineSessionController().syncOnlineRoundTransitionSnapshot();
+}
+
+function getOnlineSnapshotTurnIndex() {
+  return getOnlineSessionController().getOnlineSnapshotTurnIndex();
+}
+
+function buildOnlineRoomSummaryFromState() {
+  return getOnlineSessionController().buildOnlineRoomSummaryFromState();
+}
+
+function applyOnlineSnapshotFromFirebase(snapshot, reason = "firebase-snapshot") {
+  return getOnlineSessionController().applyOnlineSnapshotFromFirebase(snapshot, reason);
+}
+
+function onPeerConnected() {
+  return getOnlineSessionController().onPeerConnected();
 }
 
 function resetRtcSession(options = {}) {
@@ -2285,15 +2313,10 @@ function cacheUI() {
   ui.startExpiredNoteClose = document.getElementById("start-expired-note-close");
   ui.startOnlinePanel = document.getElementById("start-online-panel");
   ui.onlineHostBtn = document.getElementById("online-host-btn");
-  ui.onlineJoinBtn = document.getElementById("online-join-btn");
   ui.onlineBackBtn = document.getElementById("online-back-btn");
-  ui.onlineRoomCodeLabel = document.getElementById("online-room-code-label");
-  ui.onlineRoomCodeInput = document.getElementById("online-room-code-input");
-  ui.onlineRoomDisplay = document.getElementById("online-room-display");
-  ui.onlineRoomCodeText = document.getElementById("online-room-code-text");
-  ui.onlineInviteActions = document.getElementById("online-invite-actions");
-  ui.onlineCopyInviteBtn = document.getElementById("online-copy-invite-btn");
-  ui.onlineShareInviteBtn = document.getElementById("online-share-invite-btn");
+  ui.onlineMoveOrder = document.getElementById("online-move-order");
+  ui.onlineMoveFirstBtn = document.getElementById("online-move-first-btn");
+  ui.onlineMoveSecondBtn = document.getElementById("online-move-second-btn");
   ui.startOnlineStatus = document.getElementById("start-online-status");
   ui.startLoadActions = document.getElementById("start-load-actions");
   ui.startLoadBtn = document.getElementById("start-load-btn");
@@ -2343,15 +2366,14 @@ function bindUI() {
   ui.startCurrentGamesList?.addEventListener("click", onStartCurrentGamesListClick);
   ui.startExpiredNoteClose?.addEventListener("click", onStartExpiredNoteDismiss);
   ui.onlineHostBtn?.addEventListener("click", onOnlineHostFromMenu);
-  ui.onlineJoinBtn?.addEventListener("click", onOnlineJoinFromMenu);
-  ui.onlineCopyInviteBtn?.addEventListener("click", onOnlineCopyInviteFromMenu);
-  ui.onlineShareInviteBtn?.addEventListener("click", onOnlineShareInviteFromMenu);
+  ui.onlineMoveFirstBtn?.addEventListener("click", () => {
+    getOnlineStartController().setOnlineHostMovesFirst(true);
+  });
+  ui.onlineMoveSecondBtn?.addEventListener("click", () => {
+    getOnlineStartController().setOnlineHostMovesFirst(false);
+  });
   ui.onlineBackBtn?.addEventListener("click", onOnlineBackFromMenu);
   ui.onlineRoomChip?.addEventListener("click", onOnlineRoomChipCopy);
-  ui.onlineRoomCodeInput?.addEventListener("input", () => {
-    if (!ui.onlineRoomCodeInput) return;
-    ui.onlineRoomCodeInput.value = normalizeRoomCodeInput(ui.onlineRoomCodeInput.value);
-  });
   ui.startLoadBtn?.addEventListener("click", onStartLoadFromMenu);
   ui.startLoadManualBtn?.addEventListener("click", onStartLoadFromMenu);
   ui.friendLoadCodeBtn?.addEventListener("click", onFriendInterstitialLoadCode);
@@ -2677,18 +2699,6 @@ async function onStartModeOnlineFromMenu() {
 
 async function onOnlineHostFromMenu() {
   return getOnlineStartController().onOnlineHostFromMenu();
-}
-
-async function onOnlineJoinFromMenu() {
-  return getOnlineStartController().onOnlineJoinFromMenu();
-}
-
-async function onOnlineCopyInviteFromMenu() {
-  return getOnlineStartController().onOnlineCopyInviteFromMenu();
-}
-
-async function onOnlineShareInviteFromMenu() {
-  return getOnlineStartController().onOnlineShareInviteFromMenu();
 }
 
 function onOnlineBackFromMenu() {
@@ -4923,8 +4933,15 @@ function renderFriendInterstitial() {
       : "";
   }
   if (ui.friendCopyCodeBtn) {
-    ui.friendCopyCodeBtn.hidden = !onlineSessionActive;
-    ui.friendCopyCodeBtn.disabled = !onlineSessionActive || !isFriendTurnExportWindow();
+    if (onlineSessionActive) {
+      ui.friendCopyCodeBtn.hidden = false;
+      ui.friendCopyCodeBtn.disabled = !String(state.rtcRoomCode || "").trim();
+      ui.friendCopyCodeBtn.textContent = "Copy Game URL";
+    } else {
+      ui.friendCopyCodeBtn.hidden = !onlineSessionActive;
+      ui.friendCopyCodeBtn.disabled = !onlineSessionActive || !isFriendTurnExportWindow();
+      ui.friendCopyCodeBtn.textContent = "Copy Turn Link";
+    }
   }
   if (ui.friendBackMenuBtn) {
     ui.friendBackMenuBtn.hidden = true;
@@ -4954,8 +4971,9 @@ function renderFriendInterstitial() {
       ui.friendLoadCodeBtn.disabled = true;
     }
     if (ui.friendCopyCodeBtn) {
-      ui.friendCopyCodeBtn.hidden = true;
-      ui.friendCopyCodeBtn.disabled = true;
+      ui.friendCopyCodeBtn.hidden = false;
+      ui.friendCopyCodeBtn.disabled = !String(state.rtcRoomCode || "").trim();
+      ui.friendCopyCodeBtn.textContent = "Copy Game URL";
     }
     if (ui.friendBackMenuBtn) {
       ui.friendBackMenuBtn.hidden = false;
@@ -4990,8 +5008,9 @@ function renderFriendInterstitial() {
       ui.friendLoadCodeBtn.textContent = reconnecting ? "Reconnecting..." : "Try Reconnect";
     }
     if (ui.friendCopyCodeBtn) {
-      ui.friendCopyCodeBtn.hidden = true;
-      ui.friendCopyCodeBtn.disabled = true;
+      ui.friendCopyCodeBtn.hidden = false;
+      ui.friendCopyCodeBtn.disabled = !String(state.rtcRoomCode || "").trim();
+      ui.friendCopyCodeBtn.textContent = "Copy Game URL";
     }
     if (ui.friendManualLoadWrap) ui.friendManualLoadWrap.hidden = true;
     if (ui.friendBackMenuBtn) {
@@ -5033,9 +5052,9 @@ function renderFriendInterstitial() {
       ui.friendLoadCodeBtn.textContent = "Load Turn Link";
     }
     if (ui.friendCopyCodeBtn) {
-      ui.friendCopyCodeBtn.hidden = true;
-      ui.friendCopyCodeBtn.disabled = true;
-      ui.friendCopyCodeBtn.textContent = "Copy Turn Link";
+      ui.friendCopyCodeBtn.hidden = false;
+      ui.friendCopyCodeBtn.disabled = !String(state.rtcRoomCode || "").trim();
+      ui.friendCopyCodeBtn.textContent = "Copy Game URL";
     }
     if (ui.friendManualLoadWrap) ui.friendManualLoadWrap.hidden = true;
     if (ui.friendBackMenuBtn) {
@@ -5046,9 +5065,6 @@ function renderFriendInterstitial() {
     return;
   }
   if (onlineSessionActive && !isFriendTurnExportWindow()) {
-    if (ui.friendCopyCodeBtn) {
-      ui.friendCopyCodeBtn.disabled = true;
-    }
     if (ui.friendInterstitialText) {
       ui.friendInterstitialText.textContent = "Waiting for a completed turn handoff.";
     }

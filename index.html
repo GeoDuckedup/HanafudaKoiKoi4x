@@ -249,14 +249,13 @@
 
     <section id="start-menu" class="start-menu">
       <div class="start-card">
-        <h2>Hanafuda Koi-Koi</h2>
+        <h2>Hanafuda Koi-Koi4x</h2>
         <div id="start-expired-note" class="start-inline-note" hidden>
           <span id="start-expired-note-text">This game has expired.</span>
           <button id="start-expired-note-close" type="button" class="ghost start-inline-note-close" aria-label="Dismiss">
             x
           </button>
         </div>
-        <p>Choose how you want to play.</p>
         <div id="start-mode-actions" class="start-actions start-mode-actions">
           <button id="start-mode-cpu-btn" type="button">Play CPU</button>
           <button id="start-mode-friend-btn" type="button">Play Local</button>
@@ -275,27 +274,15 @@
           <div id="start-current-games-list" class="current-games-list"></div>
         </div>
         <div id="start-online-panel" class="online-panel" hidden>
+          <div id="online-move-order" class="online-move-order">
+            <span class="move-order-label">Who goes first?</span>
+            <div class="start-actions start-online-move-order-actions">
+              <button id="online-move-first-btn" type="button" class="primary">I go first</button>
+              <button id="online-move-second-btn" type="button">Opponent goes first</button>
+            </div>
+          </div>
           <div class="start-actions start-mode-actions">
-            <button id="online-host-btn" type="button" class="primary">Create Invite</button>
-            <button id="online-join-btn" type="button">Join by Code</button>
-          </div>
-          <label id="online-room-code-label" class="code-label" for="online-room-code-input">Room code (fallback)</label>
-          <input
-            id="online-room-code-input"
-            class="room-code-input"
-            type="text"
-            inputmode="text"
-            autocomplete="off"
-            autocapitalize="characters"
-            maxlength="10"
-            placeholder="AB12CD34EF"
-          />
-          <div id="online-room-display" class="online-room-display" hidden>
-            Invite room: <strong id="online-room-code-text">----------</strong>
-          </div>
-          <div id="online-invite-actions" class="start-actions start-online-invite-actions" hidden>
-            <button id="online-copy-invite-btn" type="button">Copy Invite Link</button>
-            <button id="online-share-invite-btn" type="button">Share Invite</button>
+            <button id="online-host-btn" type="button" class="primary">Start as Host</button>
           </div>
           <div class="start-actions">
             <button id="online-back-btn" type="button" class="ghost">Back</button>

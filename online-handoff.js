@@ -11,10 +11,12 @@
       isOnlineFriendSessionActive,
       getRtcBridge,
       encodeStateForOnline,
-      sendOnlineTurnCodeWithSnapshot,
+      getOnlineSnapshotTurnIndex,
+      buildOnlineRoomSummaryFromState,
       handleRtcReconnectRetry,
       encodeStateToCode,
       buildShareLinkFromCode,
+      buildOnlineInviteLink,
       playTurnRecapForViewer,
       renderAll,
       resetRtcSession,
@@ -71,15 +73,8 @@
       }
 
       const rtc = getRtcBridge();
-      if (!rtc || typeof rtc.sendTurnCode !== "function") {
+      if (!rtc || typeof rtc.writeSnapshot !== "function") {
         setFriendInterstitialStatus("Online transport unavailable. Return to menu and reconnect.", true);
-        state.rtcWaiting = false;
-        renderAll();
-        return;
-      }
-
-      if (state.rtcStatus !== "connected") {
-        setFriendInterstitialStatus("Peer not connected yet. Wait for reconnect or return to menu.", true);
         state.rtcWaiting = false;
         renderAll();
         return;
@@ -94,54 +89,53 @@
         renderAll();
         return;
       }
-      if (typeof sendOnlineTurnCodeWithSnapshot === "function") {
-        state.rtcWaiting = false;
-        setFriendInterstitialStatus("Saving turn snapshot...", false);
-        renderAll();
-        void Promise.resolve(
-          sendOnlineTurnCodeWithSnapshot(code, code, {
-            context: "turn-handoff",
-            onSnapshotWriteFailed: () => {
-              setFriendInterstitialStatus("Could not save turn snapshot. Retry in a moment.", true);
-            },
-            onSendFailed: () => {
-              setFriendInterstitialStatus("Automatic send failed. Waiting for reconnect.", true);
-            },
-          })
-        ).then((sent) => {
-          if (!sent) {
-            state.rtcWaiting = false;
-            renderAll();
-            return;
-          }
-          state.rtcWaiting = true;
-          setFriendInterstitialStatus(`Turn sent automatically (room ${state.rtcRoomCode}).`, false);
-          renderAll();
-        }).catch((err) => {
-          console.warn("online handoff send failed", err);
-          state.rtcWaiting = false;
-          setFriendInterstitialStatus("Automatic send failed. Waiting for reconnect.", true);
-          renderAll();
-        });
-        return;
-      }
-      const sent = rtc.sendTurnCode(code);
-      if (!sent) {
-        setFriendInterstitialStatus("Automatic send failed. Waiting for reconnect.", true);
-        state.rtcWaiting = false;
-        renderAll();
-        return;
-      }
-      state.rtcWaiting = true;
-      setFriendInterstitialStatus(`Turn sent automatically (room ${state.rtcRoomCode}).`, false);
+      state.rtcWaiting = false;
+      setFriendInterstitialStatus("Saving turn...", false);
       renderAll();
+      void Promise.resolve().then(async () => {
+        const snapshotTurnIndex =
+          typeof getOnlineSnapshotTurnIndex === "function" ? getOnlineSnapshotTurnIndex() : 0;
+        const snapshotSummary =
+          typeof buildOnlineRoomSummaryFromState === "function" ? buildOnlineRoomSummaryFromState() : null;
+        const wroteSnapshot = await rtc.writeSnapshot(code, snapshotTurnIndex, snapshotSummary);
+        if (!wroteSnapshot) {
+          state.rtcWaiting = false;
+          setFriendInterstitialStatus("Could not save turn. Retry in a moment.", true);
+          renderAll();
+          return;
+        }
+        state.rtcWaiting = true;
+        if (state.rtcStatus === "connected" && typeof rtc.sendTurnCode === "function") {
+          const sent = rtc.sendTurnCode(code);
+          if (sent) {
+            setFriendInterstitialStatus(`Turn sent automatically (room ${state.rtcRoomCode}).`, false);
+          } else {
+            setFriendInterstitialStatus("Turn saved. Opponent will receive it when they reconnect.", false);
+          }
+        } else {
+          setFriendInterstitialStatus("Turn saved. Opponent will receive it when they reconnect.", false);
+        }
+        renderAll();
+      }).catch((err) => {
+        console.warn("online handoff send failed", err);
+        state.rtcWaiting = false;
+        setFriendInterstitialStatus("Could not save turn. Retry in a moment.", true);
+        renderAll();
+      });
     }
 
     async function onFriendInterstitialCopyCode() {
       if (!isFriendMode() || !state.interstitial?.open) return;
       let link = "";
       try {
-        link = buildShareLinkFromCode(encodeStateToCode());
+        if (isOnlineFriendSessionActive()) {
+          link = String(buildOnlineInviteLink?.(state.rtcRoomCode) || "").trim();
+          if (!link) {
+            throw new Error("Invite URL unavailable.");
+          }
+        } else {
+          link = buildShareLinkFromCode(encodeStateToCode());
+        }
       } catch (err) {
         setFriendInterstitialStatus(`Could not generate link: ${err.message}`, true);
         return;
@@ -162,7 +156,7 @@
           temp.setSelectionRange(0, 0);
           document.body.removeChild(temp);
         }
-        setFriendInterstitialStatus("Turn link copied.", false);
+        setFriendInterstitialStatus(isOnlineFriendSessionActive() ? "Game URL copied." : "Turn link copied.", false);
       } catch (err) {
         setFriendInterstitialStatus(`Copy failed: ${err.message}`, true);
       }

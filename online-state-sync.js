@@ -83,6 +83,10 @@
       if (!loaded) {
         throw new Error("Could not load authoritative online snapshot.");
       }
+      const localPlayerIndex = getOnlineLocalPlayerIndex();
+      if (localPlayerIndex === 0 || localPlayerIndex === 1) {
+        state.viewerPlayerIndex = localPlayerIndex;
+      }
       state.rtcPendingStart = false;
       state.rtcReconnectFailed = false;
       if (markInitApplied) {

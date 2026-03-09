@@ -112,11 +112,12 @@
 
     function enforceInitialOnlineStartupState(reason) {
       if (!isOnlineFriendSessionActive()) return;
-      state.dealer = 0;
-      state.currentPlayer = 0;
-      state.viewerPlayerIndex = state.rtcRole === "guest" ? 1 : 0;
+      const localPlayerIndex = getOnlineLocalPlayerIndex();
+      if (localPlayerIndex === 0 || localPlayerIndex === 1) {
+        state.viewerPlayerIndex = localPlayerIndex;
+      }
       assertOnlineRoleMapping(`${reason}-role-check`);
-      debugOnlineInit("online-startup-state-forced", getOnlineStartupDebugState({ reason }));
+      debugOnlineInit("online-startup-viewer-aligned", getOnlineStartupDebugState({ reason }));
     }
 
     function createOnlineStateSyncController() {
@@ -135,6 +136,17 @@
       if (!stateSync) return;
       stateSync.applyOnlineWaitingStateFromCurrentTurn(reason);
       debugOnlineInit("waiting-state", { active: !state.rtcWaiting, reason });
+    }
+
+    function onPeerConnected() {
+      if (!isOnlineFriendSessionActive()) return false;
+      subscribeRemotePresence();
+      subscribeRemoteAbandonment();
+      applyOnlineWaitingStateFromCurrentTurn("peer-connected");
+      if (state.ready) {
+        renderAll();
+      }
+      return true;
     }
 
     function clearPresencePatienceTimer() {
@@ -211,6 +223,9 @@
           state.rtcPresenceMissingSince = 0;
           state.rtcPresenceTimeoutShown = false;
           clearPresencePatienceTimer();
+          if (state.rtcRole === "host" && state.rtcStatus === "connected" && !state.rtcInitSent) {
+            sendHostSessionInitSignal();
+          }
           if (state.rtcWaiting && state.rtcStatus === "connected" && !state.rtcReconnectInFlight) {
             setFriendInterstitialStatus(previouslyMissing ? "Opponent reconnected!" : "Opponent connected.", false);
           }
@@ -459,10 +474,6 @@
       if (state.rtcStatus !== "connected") return false;
       if (state.rtcInitSent) return true;
       assertOnlineRoleMapping("host-init-send");
-      if (state.dealer !== 0 || state.currentPlayer !== 0) {
-        warnOnlineStartupInvariant("About to send brand-new session-init with non-zero dealer/currentPlayer.", "host-init-send");
-      }
-      enforceInitialOnlineStartupState("host-init-send");
       let code = "";
       try {
         code = encodeStateForOnline();
@@ -550,18 +561,19 @@
         persistOnlineSessionContext(state.rtcRoomCode, state.rtcRole);
       }
       hideStartMenu();
+      const hostMovesFirst = state.onlineHostMovesFirst !== false;
       startNewMatch({
         playMode: "friend",
         friendFlow: "hybrid",
-        forceDealerPlayerIndex: 0,
-        forceCurrentPlayerIndex: 0,
+        forceDealerPlayerIndex: hostMovesFirst ? 0 : 1,
+        forceCurrentPlayerIndex: hostMovesFirst ? 0 : 1,
       });
       if (stateSync && typeof stateSync.clearAppliedSnapshotMarkers === "function") {
         stateSync.clearAppliedSnapshotMarkers();
       }
+      enforceInitialOnlineStartupState("begin-online-friend-match");
       subscribeRemotePresence();
       subscribeRemoteAbandonment();
-      enforceInitialOnlineStartupState("begin-online-friend-match");
       if (state.rtcRole === "guest") {
         state.rtcInitSent = false;
         state.rtcInitApplied = false;
@@ -584,6 +596,26 @@
         applyOnlineWaitingStateFromCurrentTurn("host-local-authority");
       }
       renderAll();
+    }
+
+    function applyOnlineSnapshotFromFirebase(snapshot, reason = "firebase-snapshot") {
+      if (!stateSync) {
+        throw new Error("Online state-sync controller unavailable.");
+      }
+      const result = stateSync.applyReconnectSnapshot(snapshot, { reason });
+      if (result.duplicate) {
+        debugOnlineInit("snapshot-duplicate", {
+          reason,
+          turnIndex: result.turnIndex,
+        });
+        applyOnlineWaitingStateFromCurrentTurn(`${reason}-duplicate`);
+        return result;
+      }
+      debugOnlineInit("snapshot-applied", {
+        reason,
+        turnIndex: result.turnIndex,
+      });
+      return result;
     }
 
     async function handleOnlineReconnect(roomCode, role) {
@@ -623,23 +655,7 @@
         }
 
         if (snapshot && typeof snapshot.state === "string" && snapshot.state.trim()) {
-          if (!stateSync) {
-            throw new Error("Online state-sync controller unavailable.");
-          }
-          const result = stateSync.applyReconnectSnapshot(snapshot, { reason: "reconnect" });
-          if (result.duplicate) {
-            debugOnlineInit("reconnect-snapshot-duplicate", {
-              turnIndex: result.turnIndex,
-              reason: "reconnect",
-            });
-            applyOnlineWaitingStateFromCurrentTurn("reconnect-duplicate");
-            renderAll();
-            return true;
-          }
-          debugOnlineInit("reconnect-snapshot-applied", {
-            turnIndex: result.turnIndex,
-            reason: "reconnect",
-          });
+          applyOnlineSnapshotFromFirebase(snapshot, "reconnect");
           return true;
         }
 
@@ -859,8 +875,12 @@
       assertOnlineRoleMapping,
       enforceInitialOnlineStartupState,
       applyOnlineWaitingStateFromCurrentTurn,
+      onPeerConnected,
       sendHostSessionInitSignal,
       encodeStateForOnline,
+      getOnlineSnapshotTurnIndex,
+      buildOnlineRoomSummaryFromState,
+      applyOnlineSnapshotFromFirebase,
       encodeRtcSignal,
       tryDecodeRtcSignal,
       sendRtcSignal,

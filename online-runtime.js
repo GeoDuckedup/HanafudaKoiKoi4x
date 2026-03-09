@@ -6,6 +6,7 @@
       setStartOnlineStatus,
       setFriendInterstitialStatus,
       beginOnlineFriendMatch,
+      onPeerConnected,
       handleRtcDisconnectAutoReconnect,
       renderAll,
       setStartOnlineRoomDisplay,
@@ -28,7 +29,7 @@
           } else if (state.rtcStatus === "disconnected" || state.rtcStatus === "error") {
             setStartOnlineStatus("Connection failed. Try hosting/joining again.", true);
           } else if (state.rtcStatus === "connected") {
-            setStartOnlineStatus("Connection established. Starting match...", false);
+            setStartOnlineStatus("Connected. Syncing latest game state...", false);
           }
         }
         if (state.rtcRole && state.rtcOpponentAbandoned) {
@@ -51,7 +52,12 @@
         } else if (state.rtcRole && state.rtcStatus === "connected" && state.rtcWaiting) {
           setFriendInterstitialStatus("Connected. Waiting for incoming handoff.", false);
         }
-        if (state.rtcPendingStart && state.rtcStatus === "connected") {
+        if (state.rtcStatus === "connected" && state.rtcRole && !state.rtcPendingStart) {
+          if (typeof onPeerConnected === "function") {
+            onPeerConnected();
+          }
+        }
+        if (state.rtcPendingStart && state.rtcStatus === "connected" && state.rtcRole === "guest") {
           beginOnlineFriendMatch();
         }
         if (state.ready) {
