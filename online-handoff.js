@@ -187,17 +187,9 @@
         const onlineSessionActive = isOnlineFriendSessionActive();
         if (onlineSessionActive) {
           const confirmed = window.confirm(
-            "Leave this online game and return to menu? Your opponent will be notified that you left."
+            "Leave this online game and return to menu? The game stays active and you can resume from Load Game."
           );
           if (!confirmed) return;
-          const rtc = getRtcBridge();
-          if (rtc && typeof rtc.writeAbandoned === "function") {
-            try {
-              await rtc.writeAbandoned(state.rtcRole);
-            } catch (err) {
-              console.warn("online abandon write failed", err);
-            }
-          }
         }
         resetRtcSession({ closeConnection: true });
         setFriendInterstitialOpen(false);

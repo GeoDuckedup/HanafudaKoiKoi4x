@@ -11,6 +11,7 @@
   const MAX_MESSAGE_PAYLOAD_LENGTH = 16_000;
   const ROOM_INDEX_VERSION = 1;
   const USER_ROOM_SUMMARY_VERSION = 1;
+  const ROOM_SUMMARY_VERSION = 1;
 
   let role = null;
   let roomCode = "";
@@ -166,6 +167,81 @@
       lastActiveAt: Number.isFinite(lastActiveAtValue) && lastActiveAtValue > 0 ? Math.floor(lastActiveAtValue) : nowMs,
       updatedAt: Number.isFinite(updatedAtValue) && updatedAtValue > 0 ? Math.floor(updatedAtValue) : nowMs,
     };
+  }
+
+  function normalizeRoomSummaryPayload(rawSummary, nowMs = Date.now()) {
+    if (!rawSummary || typeof rawSummary !== "object") return null;
+    const hostName = String(rawSummary.hostName || "").trim() || "Player 1";
+    const guestName = String(rawSummary.guestName || "").trim() || "Player 2";
+    const hostScoreRaw = Number(rawSummary.hostScore ?? 0);
+    const guestScoreRaw = Number(rawSummary.guestScore ?? 0);
+    const roundRaw = Number(rawSummary.round ?? 1);
+    const monthRaw = Number(rawSummary.month ?? roundRaw);
+    const turnOwnerRaw = String(rawSummary.turnOwner || "").trim().toLowerCase();
+    const statusRaw = String(rawSummary.status || "").trim().toLowerCase();
+    const updatedAtRaw = Number(rawSummary.updatedAt ?? 0);
+
+    const hostScore = Number.isFinite(hostScoreRaw) && hostScoreRaw >= 0 ? Math.floor(hostScoreRaw) : 0;
+    const guestScore = Number.isFinite(guestScoreRaw) && guestScoreRaw >= 0 ? Math.floor(guestScoreRaw) : 0;
+    const round = Number.isFinite(roundRaw) && roundRaw >= 1 ? Math.floor(roundRaw) : 1;
+    const month = Number.isFinite(monthRaw) ? Math.max(1, Math.min(12, Math.floor(monthRaw))) : Math.max(1, Math.min(12, round));
+    const turnOwner = turnOwnerRaw === "host" || turnOwnerRaw === "guest" || turnOwnerRaw === "none" ? turnOwnerRaw : "none";
+    const status =
+      statusRaw === "waiting" ||
+      statusRaw === "active" ||
+      statusRaw === "finished" ||
+      statusRaw === "closed" ||
+      statusRaw === "expired"
+        ? statusRaw
+        : "active";
+    const finished = rawSummary.finished === true || status === "finished" || status === "closed" || status === "expired";
+    const updatedAt = Number.isFinite(updatedAtRaw) && updatedAtRaw > 0 ? Math.floor(updatedAtRaw) : Math.floor(nowMs);
+
+    return {
+      version: ROOM_SUMMARY_VERSION,
+      hostName,
+      guestName,
+      hostScore,
+      guestScore,
+      round,
+      month,
+      turnOwner,
+      status,
+      finished,
+      updatedAt,
+    };
+  }
+
+  async function writeRoomSummaryInternal(db, code, summaryPayload, options = {}) {
+    const { useServerTimestamp = false } = options;
+    const targetCode = normalizeRoomCode(code);
+    if (!targetCode) return false;
+    const normalizedSummary = normalizeRoomSummaryPayload(summaryPayload, Date.now());
+    if (!normalizedSummary) return false;
+    if (useServerTimestamp) {
+      normalizedSummary.updatedAt = window.firebase?.database?.ServerValue?.TIMESTAMP ?? Date.now();
+    }
+    try {
+      await db.ref(`rooms/${targetCode}/summary`).set(normalizedSummary);
+      return true;
+    } catch (err) {
+      console.warn("rtc writeRoomSummary failed", { roomCode: targetCode, err });
+      return false;
+    }
+  }
+
+  async function readRoomSummaryByCodeInternal(db, code) {
+    const targetCode = normalizeRoomCode(code);
+    if (!targetCode) return null;
+    try {
+      const summarySnap = await db.ref(`rooms/${targetCode}/summary`).once("value");
+      const raw = summarySnap?.val();
+      if (!raw || typeof raw !== "object") return null;
+      return normalizeRoomSummaryPayload(raw, Date.now());
+    } catch (err) {
+      console.warn("rtc readRoomSummaryByCode failed", { roomCode: targetCode, err });
+      return null;
+    }
   }
 
   async function readRoomIndexInternal(db, code) {
@@ -726,6 +802,20 @@
       await withDbStep("Refresh room activity", () => touchRoomActivity(db, { force: true }));
       await withDbStep("Sync room index", () => syncRoomIndexFromLifecycle(db, normalized));
       await withDbStep("Sync host user room summary", () => upsertOwnUserRoomSummary(db, authUser.uid, normalized, "host"));
+      await withDbStep("Set initial room summary", () =>
+        writeRoomSummaryInternal(db, normalized, {
+          hostName: "Player 1",
+          guestName: "Player 2",
+          hostScore: 0,
+          guestScore: 0,
+          round: 1,
+          month: 1,
+          turnOwner: "host",
+          status: "waiting",
+          finished: false,
+          updatedAt: Date.now(),
+        })
+      );
       await withDbStep("Set host presence", () => setupPresence(db));
       await withDbStep("Write room creation rate limit", () => {
         const serverTimestamp = window.firebase?.database?.ServerValue?.TIMESTAMP ?? Date.now();
@@ -777,6 +867,21 @@
       await withDbStep("Refresh room activity", () => touchRoomActivity(db, { force: true }));
       await withDbStep("Sync room index", () => syncRoomIndexFromLifecycle(db, normalized));
       await withDbStep("Sync guest user room summary", () => upsertOwnUserRoomSummary(db, authUser.uid, normalized, "guest"));
+      await withDbStep("Set joined room summary", async () => {
+        const existingSummary = await readRoomSummaryByCodeInternal(db, normalized);
+        return writeRoomSummaryInternal(db, normalized, {
+          hostName: existingSummary?.hostName || "Player 1",
+          guestName: existingSummary?.guestName || "Player 2",
+          hostScore: existingSummary?.hostScore ?? 0,
+          guestScore: existingSummary?.guestScore ?? 0,
+          round: existingSummary?.round ?? 1,
+          month: existingSummary?.month ?? 1,
+          turnOwner: existingSummary?.turnOwner || "host",
+          status: "active",
+          finished: false,
+          updatedAt: Date.now(),
+        });
+      });
       await withDbStep("Set guest presence", () => setupPresence(db));
       subscribeRelayListeners(db);
       startKeepalive();
@@ -816,7 +921,7 @@
     return sent;
   }
 
-  async function writeSnapshot(stateString, turnIndex) {
+  async function writeSnapshot(stateString, turnIndex, roomSummary = null) {
     if (!roomCode) return false;
     const payload = String(stateString || "");
     if (!payload) {
@@ -824,6 +929,14 @@
       return false;
     }
     const normalizedTurnIndex = Math.max(0, Math.floor(Number(turnIndex) || 0));
+    let normalizedSummary = null;
+    if (roomSummary && typeof roomSummary === "object") {
+      normalizedSummary = normalizeRoomSummaryPayload(roomSummary, Date.now());
+      if (!normalizedSummary) {
+        console.warn("rtc writeSnapshot skipped: invalid room summary payload");
+        return false;
+      }
+    }
     let db = null;
     try {
       db = getDbOrThrow();
@@ -833,11 +946,20 @@
     }
     try {
       const serverTimestamp = window.firebase?.database?.ServerValue?.TIMESTAMP ?? Date.now();
-      await db.ref(roomPath("snapshot")).set({
+      const snapshotPayload = {
         state: payload,
         turnIndex: normalizedTurnIndex,
         updatedAt: serverTimestamp,
-      });
+      };
+      if (normalizedSummary) {
+        normalizedSummary.updatedAt = serverTimestamp;
+        const updates = {};
+        updates[roomPath("snapshot")] = snapshotPayload;
+        updates[roomPath("summary")] = normalizedSummary;
+        await db.ref().update(updates);
+      } else {
+        await db.ref(roomPath("snapshot")).set(snapshotPayload);
+      }
       touchRoomActivity(db).catch(() => {});
       return true;
     } catch (err) {
@@ -1076,6 +1198,22 @@
       await withDbStep("Sync rejoin user room summary", () =>
         upsertOwnUserRoomSummary(db, authUser.uid, normalized, normalizedRole)
       );
+      await withDbStep("Ensure room summary", async () => {
+        const existingSummary = await readRoomSummaryByCodeInternal(db, normalized);
+        if (existingSummary) return true;
+        return writeRoomSummaryInternal(db, normalized, {
+          hostName: "Player 1",
+          guestName: "Player 2",
+          hostScore: 0,
+          guestScore: 0,
+          round: 1,
+          month: 1,
+          turnOwner: "host",
+          status: "active",
+          finished: false,
+          updatedAt: Date.now(),
+        });
+      });
       await withDbStep("Set rejoin presence", () => setupPresence(db));
       subscribeRelayListeners(db);
       startKeepalive();
@@ -1141,7 +1279,33 @@
       ...buildRoomActivityUpdate(nowMs),
     };
     try {
-      await db.ref(`rooms/${targetRoomCode}`).update(payload);
+      const existingSummary = await readRoomSummaryByCodeInternal(db, targetRoomCode);
+      const closedSummary = normalizeRoomSummaryPayload(
+        {
+          hostName: existingSummary?.hostName || "Player 1",
+          guestName: existingSummary?.guestName || "Player 2",
+          hostScore: existingSummary?.hostScore ?? 0,
+          guestScore: existingSummary?.guestScore ?? 0,
+          round: existingSummary?.round ?? 1,
+          month: existingSummary?.month ?? 1,
+          turnOwner: "none",
+          status: "closed",
+          finished: true,
+          updatedAt: nowMs,
+        },
+        nowMs
+      );
+      const updates = {};
+      updates[`rooms/${targetRoomCode}/abandoned`] = payload.abandoned;
+      updates[`rooms/${targetRoomCode}/abandonedBy`] = payload.abandonedBy;
+      updates[`rooms/${targetRoomCode}/connected`] = payload.connected;
+      updates[`rooms/${targetRoomCode}/lastActiveAt`] = payload.lastActiveAt;
+      updates[`rooms/${targetRoomCode}/expiresAt`] = payload.expiresAt;
+      updates[`rooms/${targetRoomCode}/updatedAt`] = payload.updatedAt;
+      if (closedSummary) {
+        updates[`rooms/${targetRoomCode}/summary`] = closedSummary;
+      }
+      await db.ref().update(updates);
       await syncRoomIndexFromLifecycle(db, targetRoomCode);
       const authUid = String(window._firebaseAuth?.currentUser?.uid || "").trim();
       if (authUid) {
@@ -1235,6 +1399,20 @@
       const normalized = normalizeRoomCode(inputRoomCode);
       if (!normalized) return null;
       return readRoomSnapshotByCodeInternal(db, normalized);
+    },
+    async readRoomSummaryByCode(inputRoomCode) {
+      const db = getDbOrThrow();
+      await waitForAuthUser();
+      const normalized = normalizeRoomCode(inputRoomCode);
+      if (!normalized) return null;
+      return readRoomSummaryByCodeInternal(db, normalized);
+    },
+    async writeRoomSummary(inputRoomCode, summaryPayload) {
+      const db = getDbOrThrow();
+      await waitForAuthUser();
+      const normalized = normalizeRoomCode(inputRoomCode);
+      if (!normalized) return false;
+      return writeRoomSummaryInternal(db, normalized, summaryPayload, { useServerTimestamp: true });
     },
     async removeOwnRoomSummary(inputRoomCode) {
       const db = getDbOrThrow();

@@ -337,6 +337,43 @@
       return `${prefix}.${trimmedPayload}.${checksum}`;
     }
 
+    function getOnlineTurnOwnerRoleFromState() {
+      if (state.currentPlayer === 0) return "host";
+      if (state.currentPlayer === 1) return "guest";
+      return "none";
+    }
+
+    function buildOnlineRoomSummaryFromState() {
+      if (!isOnlineFriendSessionActive()) return null;
+      const hostName = String(state.players?.[0]?.name || "Player 1").trim() || "Player 1";
+      const guestName = String(state.players?.[1]?.name || "Player 2").trim() || "Player 2";
+      const hostScoreRaw = Number(state.players?.[0]?.score || 0);
+      const guestScoreRaw = Number(state.players?.[1]?.score || 0);
+      const roundRaw = Number(state.gameNumber || 1);
+      const round = Number.isFinite(roundRaw) && roundRaw >= 1 ? Math.floor(roundRaw) : 1;
+      const month = Math.max(1, Math.min(12, round));
+      const hostScore = Number.isFinite(hostScoreRaw) && hostScoreRaw >= 0 ? Math.floor(hostScoreRaw) : 0;
+      const guestScore = Number.isFinite(guestScoreRaw) && guestScoreRaw >= 0 ? Math.floor(guestScoreRaw) : 0;
+      let status = "active";
+      if (state.matchOver) {
+        status = "finished";
+      } else if (state.rtcWaiting || state.rtcRemotePresence === false) {
+        status = "waiting";
+      }
+      return {
+        hostName,
+        guestName,
+        hostScore,
+        guestScore,
+        round,
+        month,
+        turnOwner: state.matchOver ? "none" : getOnlineTurnOwnerRoleFromState(),
+        status,
+        finished: state.matchOver === true,
+        updatedAt: Date.now(),
+      };
+    }
+
     function tryDecodeRtcSignal(raw) {
       const text = String(raw || "");
       if (!text.startsWith(RTC_SIGNAL_PREFIX)) return null;
@@ -353,7 +390,7 @@
     }
 
     async function sendOnlineTurnCodeWithSnapshot(stateCode, wirePayload, options = {}) {
-      const { context = "online-turn", onSnapshotWriteFailed = null, onSendFailed = null } = options;
+      const { context = "online-turn", onSnapshotWriteFailed = null, onSendFailed = null, roomSummary = null } = options;
       const rtc = getRtcBridge();
       if (!rtc || typeof rtc.sendTurnCode !== "function") return false;
       const normalizedStateCode = String(stateCode || "").trim();
@@ -361,7 +398,8 @@
       if (!normalizedStateCode || !normalizedWirePayload) return false;
 
       if (typeof rtc.writeSnapshot === "function") {
-        const wroteSnapshot = await rtc.writeSnapshot(normalizedStateCode, getOnlineSnapshotTurnIndex());
+        const snapshotSummary = roomSummary && typeof roomSummary === "object" ? roomSummary : buildOnlineRoomSummaryFromState();
+        const wroteSnapshot = await rtc.writeSnapshot(normalizedStateCode, getOnlineSnapshotTurnIndex(), snapshotSummary);
         if (!wroteSnapshot) {
           console.warn(`[online] ${context}: snapshot write failed; skipping send.`);
           if (typeof onSnapshotWriteFailed === "function") {
@@ -398,7 +436,13 @@
     }
 
     async function sendRtcSignalWithSnapshot(payload, options = {}) {
-      const { snapshotCode = "", context = "rtc-signal", onSnapshotWriteFailed = null, onSendFailed = null } = options;
+      const {
+        snapshotCode = "",
+        context = "rtc-signal",
+        onSnapshotWriteFailed = null,
+        onSendFailed = null,
+        roomSummary = null,
+      } = options;
       const normalizedSnapshotCode = String(snapshotCode || "").trim();
       if (!normalizedSnapshotCode) return false;
       const encodedPayload = encodeRtcSignal(payload);
@@ -406,6 +450,7 @@
         context,
         onSnapshotWriteFailed,
         onSendFailed,
+        roomSummary,
       });
     }
 

@@ -1046,6 +1046,105 @@ function decodeOnlineSnapshotForCurrentGames(stateCode) {
   }
 }
 
+function normalizeOnlineRoomSummary(rawSummary) {
+  if (!rawSummary || typeof rawSummary !== "object") return null;
+  const hostName = String(rawSummary.hostName || "").trim() || "Player 1";
+  const guestName = String(rawSummary.guestName || "").trim() || "Player 2";
+  const hostScoreRaw = Number(rawSummary.hostScore ?? 0);
+  const guestScoreRaw = Number(rawSummary.guestScore ?? 0);
+  const roundRaw = Number(rawSummary.round ?? 1);
+  const monthRaw = Number(rawSummary.month ?? roundRaw);
+  const turnOwnerRaw = String(rawSummary.turnOwner || "").trim().toLowerCase();
+  const statusRaw = String(rawSummary.status || "").trim().toLowerCase();
+  const updatedAtRaw = Number(rawSummary.updatedAt ?? 0);
+
+  const hostScore = Number.isFinite(hostScoreRaw) && hostScoreRaw >= 0 ? Math.floor(hostScoreRaw) : 0;
+  const guestScore = Number.isFinite(guestScoreRaw) && guestScoreRaw >= 0 ? Math.floor(guestScoreRaw) : 0;
+  const round = Number.isFinite(roundRaw) && roundRaw >= 1 ? Math.floor(roundRaw) : 1;
+  const month = Number.isFinite(monthRaw) ? Math.max(1, Math.min(12, Math.floor(monthRaw))) : Math.max(1, Math.min(12, round));
+  const turnOwner = turnOwnerRaw === "host" || turnOwnerRaw === "guest" || turnOwnerRaw === "none" ? turnOwnerRaw : "none";
+  const status =
+    statusRaw === "waiting" ||
+    statusRaw === "active" ||
+    statusRaw === "finished" ||
+    statusRaw === "closed" ||
+    statusRaw === "expired"
+      ? statusRaw
+      : "active";
+  const finished = rawSummary.finished === true || status === "finished" || status === "closed" || status === "expired";
+  const updatedAt = Number.isFinite(updatedAtRaw) && updatedAtRaw > 0 ? Math.floor(updatedAtRaw) : 0;
+
+  return {
+    hostName,
+    guestName,
+    hostScore,
+    guestScore,
+    round,
+    month,
+    turnOwner,
+    status,
+    finished,
+    updatedAt,
+  };
+}
+
+function isOnlineRoomSummaryComplete(roomSummary) {
+  if (!roomSummary) return false;
+  if (!roomSummary.hostName || !roomSummary.guestName) return false;
+  if (!Number.isFinite(Number(roomSummary.round)) || Number(roomSummary.round) < 1) return false;
+  if (!Number.isFinite(Number(roomSummary.month)) || Number(roomSummary.month) < 1 || Number(roomSummary.month) > 12) {
+    return false;
+  }
+  if (!Number.isFinite(Number(roomSummary.hostScore)) || Number(roomSummary.hostScore) < 0) return false;
+  if (!Number.isFinite(Number(roomSummary.guestScore)) || Number(roomSummary.guestScore) < 0) return false;
+  if (!roomSummary.status) return false;
+  return true;
+}
+
+function buildOnlineRoomSummaryFromSnapshotPayload(snapshotPayload) {
+  const decodedSnapshot = decodeOnlineSnapshotForCurrentGames(snapshotPayload?.state || "");
+  if (!decodedSnapshot) return null;
+  const players = Array.isArray(decodedSnapshot.players) ? decodedSnapshot.players : [];
+  const hostName = String(players?.[0]?.name || "Player 1").trim() || "Player 1";
+  const guestName = String(players?.[1]?.name || "Player 2").trim() || "Player 2";
+  const hostScoreRaw = Number(players?.[0]?.score || 0);
+  const guestScoreRaw = Number(players?.[1]?.score || 0);
+  const roundRaw = Number(decodedSnapshot.gameNumber || 1);
+  const round = Number.isFinite(roundRaw) && roundRaw >= 1 ? Math.floor(roundRaw) : 1;
+  const turnOwner = decodedSnapshot.currentPlayer === 0 ? "host" : decodedSnapshot.currentPlayer === 1 ? "guest" : "none";
+  return normalizeOnlineRoomSummary({
+    hostName,
+    guestName,
+    hostScore: Number.isFinite(hostScoreRaw) && hostScoreRaw >= 0 ? Math.floor(hostScoreRaw) : 0,
+    guestScore: Number.isFinite(guestScoreRaw) && guestScoreRaw >= 0 ? Math.floor(guestScoreRaw) : 0,
+    round,
+    month: round,
+    turnOwner: decodedSnapshot.matchOver === true ? "none" : turnOwner,
+    status: decodedSnapshot.matchOver === true ? "finished" : "active",
+    finished: decodedSnapshot.matchOver === true,
+    updatedAt: Number(snapshotPayload?.updatedAt || 0) || Date.now(),
+  });
+}
+
+function mergeOnlineRoomSummary(primarySummary, fallbackSummary) {
+  const primary = normalizeOnlineRoomSummary(primarySummary);
+  const fallback = normalizeOnlineRoomSummary(fallbackSummary);
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+  return normalizeOnlineRoomSummary({
+    hostName: primary.hostName || fallback.hostName,
+    guestName: primary.guestName || fallback.guestName,
+    hostScore: Number.isFinite(primary.hostScore) ? primary.hostScore : fallback.hostScore,
+    guestScore: Number.isFinite(primary.guestScore) ? primary.guestScore : fallback.guestScore,
+    round: Number.isFinite(primary.round) && primary.round >= 1 ? primary.round : fallback.round,
+    month: Number.isFinite(primary.month) && primary.month >= 1 && primary.month <= 12 ? primary.month : fallback.month,
+    turnOwner: primary.turnOwner || fallback.turnOwner,
+    status: primary.status || fallback.status,
+    finished: primary.finished === true || fallback.finished === true,
+    updatedAt: Number(primary.updatedAt || 0) > 0 ? Number(primary.updatedAt || 0) : Number(fallback.updatedAt || 0),
+  });
+}
+
 function clearOnlineSessionContextForRoom(roomCode) {
   const normalizedRoomCode = normalizeOnlineInviteRoomId(roomCode);
   if (!ONLINE_ROOM_CODE_REGEX.test(normalizedRoomCode)) return;
@@ -1055,24 +1154,27 @@ function clearOnlineSessionContextForRoom(roomCode) {
   }
 }
 
-function buildOnlineCurrentGamesEntry(summary, snapshotPayload = null) {
+function buildOnlineCurrentGamesEntry(summary, roomSummary = null, snapshotPayload = null) {
   const normalizedRoomCode = normalizeOnlineInviteRoomId(summary?.roomCode);
   const normalizedRole = normalizeOnlineResumeRole(summary?.role) || "host";
   if (!ONLINE_ROOM_CODE_REGEX.test(normalizedRoomCode)) return null;
   const joinState = normalizeOnlineJoinState(summary?.joinState);
-  const decodedSnapshot = decodeOnlineSnapshotForCurrentGames(snapshotPayload?.state || "");
-  const playerList = Array.isArray(decodedSnapshot?.players) ? decodedSnapshot.players : [];
+  const normalizedRoomSummary = normalizeOnlineRoomSummary(roomSummary);
   const localPlayerIndex = normalizedRole === "host" ? 0 : 1;
-  const remotePlayerIndex = localPlayerIndex === 0 ? 1 : 0;
-  const localName = String(playerList?.[localPlayerIndex]?.name || "You").trim() || "You";
-  const remoteName = String(playerList?.[remotePlayerIndex]?.name || "Opponent").trim() || "Opponent";
-  const hostScore = Number(playerList?.[0]?.score || 0);
-  const guestScore = Number(playerList?.[1]?.score || 0);
+  const hostName = String(normalizedRoomSummary?.hostName || "Player 1").trim() || "Player 1";
+  const guestName = String(normalizedRoomSummary?.guestName || "Player 2").trim() || "Player 2";
+  const localName = localPlayerIndex === 0 ? hostName : guestName;
+  const remoteName = localPlayerIndex === 0 ? guestName : hostName;
+  const hostScore = Number(normalizedRoomSummary?.hostScore ?? 0);
+  const guestScore = Number(normalizedRoomSummary?.guestScore ?? 0);
   const localScore = localPlayerIndex === 0 ? hostScore : guestScore;
   const remoteScore = localPlayerIndex === 0 ? guestScore : hostScore;
-  const roundValue = Number(decodedSnapshot?.gameNumber || 1);
+  const roundValue = Number(normalizedRoomSummary?.round || 1);
   const normalizedRound = Number.isFinite(roundValue) && roundValue >= 1 ? Math.floor(roundValue) : 1;
-  const currentTurnOwner = decodedSnapshot?.currentPlayer === 0 || decodedSnapshot?.currentPlayer === 1 ? decodedSnapshot.currentPlayer : null;
+  const summaryTurnOwnerRole =
+    normalizedRoomSummary?.turnOwner === "host" || normalizedRoomSummary?.turnOwner === "guest"
+      ? normalizedRoomSummary.turnOwner
+      : "none";
 
   let status = "waiting";
   let statusLabel = "Waiting on opponent";
@@ -1081,26 +1183,42 @@ function buildOnlineCurrentGamesEntry(summary, snapshotPayload = null) {
     finished = true;
     status = "finished";
     statusLabel = "Expired / unavailable";
-  } else if (decodedSnapshot?.matchOver === true) {
+  } else if (normalizedRoomSummary?.status === "expired" || normalizedRoomSummary?.status === "closed") {
+    finished = true;
+    status = "finished";
+    statusLabel = "Expired / unavailable";
+  } else if (normalizedRoomSummary?.finished === true || normalizedRoomSummary?.status === "finished") {
     finished = true;
     status = "finished";
     statusLabel = "Finished";
-  } else if (currentTurnOwner === localPlayerIndex) {
+  } else if (summaryTurnOwnerRole === normalizedRole) {
     status = "your-turn";
     statusLabel = "Your turn";
-  } else if (currentTurnOwner === 0 || currentTurnOwner === 1) {
+  } else if (summaryTurnOwnerRole === "host" || summaryTurnOwnerRole === "guest") {
     status = "waiting";
     statusLabel = "Waiting on opponent";
-  } else if (normalizedRole === "host" && joinState === "open") {
+  } else if (normalizedRoomSummary?.status === "waiting" || normalizedRole === "host" || joinState === "open") {
     status = "waiting";
     statusLabel = "Waiting on opponent";
   }
 
+  const roomSummaryUpdatedAt = Number(normalizedRoomSummary?.updatedAt || 0);
   const summaryUpdatedAt = Number(summary?.updatedAt || 0);
   const snapshotUpdatedAt = Number(snapshotPayload?.updatedAt || 0);
-  const resolvedUpdatedAt = Math.max(summaryUpdatedAt, snapshotUpdatedAt, Date.now());
+  const resolvedUpdatedAt =
+    roomSummaryUpdatedAt > 0
+      ? roomSummaryUpdatedAt
+      : summaryUpdatedAt > 0
+        ? summaryUpdatedAt
+        : snapshotUpdatedAt > 0
+          ? snapshotUpdatedAt
+          : Date.now();
   const normalizedTurnOwner =
-    currentTurnOwner === localPlayerIndex ? 0 : currentTurnOwner === remotePlayerIndex ? 1 : null;
+    summaryTurnOwnerRole === normalizedRole
+      ? 0
+      : summaryTurnOwnerRole === (normalizedRole === "host" ? "guest" : "host")
+        ? 1
+        : null;
   return {
     id: buildOnlineCurrentGamesEntryId(normalizedRoomCode, normalizedRole),
     mode: "online",
@@ -1120,6 +1238,7 @@ function buildOnlineCurrentGamesEntry(summary, snapshotPayload = null) {
     resumeRole: normalizedRole,
     onlineJoinState: joinState,
     onlineStatusLabel: statusLabel,
+    onlineMonth: Number(normalizedRoomSummary?.month || normalizedRound),
   };
 }
 
@@ -1140,13 +1259,33 @@ async function listOnlineCurrentGamesEntries() {
         const normalizedRole = normalizeOnlineResumeRole(summary?.role);
         const normalizedRoomCode = normalizeOnlineInviteRoomId(summary?.roomCode);
         if (!normalizedRole || !ONLINE_ROOM_CODE_REGEX.test(normalizedRoomCode)) return;
+        let roomSummary = null;
+        if (typeof rtc.readRoomSummaryByCode === "function") {
+          try {
+            roomSummary = await rtc.readRoomSummaryByCode(normalizedRoomCode);
+          } catch (err) {
+            console.warn("[current-games] online room summary read failed", { roomCode: normalizedRoomCode, err });
+          }
+        }
         let snapshotPayload = null;
-        if (typeof rtc.readRoomSnapshotByCode === "function") {
+        let snapshotSummary = null;
+        const normalizedRoomSummary = normalizeOnlineRoomSummary(roomSummary);
+        if (!isOnlineRoomSummaryComplete(normalizedRoomSummary) && typeof rtc.readRoomSnapshotByCode === "function") {
           try {
             snapshotPayload = await rtc.readRoomSnapshotByCode(normalizedRoomCode);
+            snapshotSummary = buildOnlineRoomSummaryFromSnapshotPayload(snapshotPayload);
           } catch (err) {
-            console.warn("[current-games] online snapshot read failed", { roomCode: normalizedRoomCode, err });
+            console.warn("[current-games] online snapshot fallback read failed", { roomCode: normalizedRoomCode, err });
           }
+        }
+        const effectiveRoomSummary = mergeOnlineRoomSummary(normalizedRoomSummary, snapshotSummary);
+        if (
+          effectiveRoomSummary &&
+          snapshotSummary &&
+          typeof rtc.writeRoomSummary === "function" &&
+          !isOnlineRoomSummaryComplete(normalizedRoomSummary)
+        ) {
+          rtc.writeRoomSummary(normalizedRoomCode, effectiveRoomSummary).catch(() => {});
         }
         const entry = buildOnlineCurrentGamesEntry(
           {
@@ -1155,6 +1294,7 @@ async function listOnlineCurrentGamesEntries() {
             joinState: summary?.joinState,
             updatedAt: summary?.updatedAt,
           },
+          effectiveRoomSummary,
           snapshotPayload
         );
         if (!entry) return;
@@ -1201,11 +1341,28 @@ async function listOnlineCurrentGamesEntries() {
             if (typeof rtc.syncOwnRoomSummary === "function") {
               rtc.syncOwnRoomSummary(fallbackRoomCode, fallbackRole).catch(() => {});
             }
+            let fallbackRoomSummary = null;
+            if (typeof rtc.readRoomSummaryByCode === "function") {
+              fallbackRoomSummary = await rtc.readRoomSummaryByCode(fallbackRoomCode).catch(() => null);
+            }
+            const normalizedFallbackRoomSummary = normalizeOnlineRoomSummary(fallbackRoomSummary);
             const fallbackSnapshot =
-              rtc && typeof rtc.readRoomSnapshotByCode === "function"
+              !isOnlineRoomSummaryComplete(normalizedFallbackRoomSummary) &&
+              rtc &&
+              typeof rtc.readRoomSnapshotByCode === "function"
                 ? await rtc.readRoomSnapshotByCode(fallbackRoomCode).catch(() => null)
                 : null;
-            const fallbackEntry = buildOnlineCurrentGamesEntry(fallbackSummary, fallbackSnapshot);
+            const fallbackSnapshotSummary = buildOnlineRoomSummaryFromSnapshotPayload(fallbackSnapshot);
+            const mergedFallbackSummary = mergeOnlineRoomSummary(normalizedFallbackRoomSummary, fallbackSnapshotSummary);
+            if (
+              mergedFallbackSummary &&
+              fallbackSnapshotSummary &&
+              typeof rtc.writeRoomSummary === "function" &&
+              !isOnlineRoomSummaryComplete(normalizedFallbackRoomSummary)
+            ) {
+              rtc.writeRoomSummary(fallbackRoomCode, mergedFallbackSummary).catch(() => {});
+            }
+            const fallbackEntry = buildOnlineCurrentGamesEntry(fallbackSummary, mergedFallbackSummary, fallbackSnapshot);
             if (fallbackEntry) {
               entriesById.set(fallbackEntry.id, fallbackEntry);
             }
@@ -1271,7 +1428,11 @@ function buildCurrentGamesCard(savedMatch) {
   const title = String(savedMatch.title || (savedMatch.mode === "cpu" ? CPU_SAVE_TITLE : LOCAL_SAVE_TITLE)).trim();
   const isOnlineCard = savedMatch.mode === "online";
   const roundValue = Number(savedMatch.round || 1);
-  const monthName = describeMonthNameOnly(roundValue);
+  const monthValue =
+    isOnlineCard && Number.isFinite(Number(savedMatch.onlineMonth))
+      ? Math.max(1, Math.min(12, Math.floor(Number(savedMatch.onlineMonth))))
+      : roundValue;
+  const monthName = describeMonthNameOnly(monthValue);
   const main = document.createElement("div");
   main.className = "current-games-main";
   if (savedMatch.mode === "cpu") {
