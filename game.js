@@ -2243,8 +2243,7 @@ function cacheUI() {
   ui.rtcStatusBadge = document.getElementById("rtc-status-badge");
   ui.rtcStatusDot = document.getElementById("rtc-status-dot");
   ui.rtcStatusText = document.getElementById("rtc-status-text");
-  ui.onlineRoomChip = document.getElementById("online-room-chip");
-  ui.onlineLeaveBtn = document.getElementById("online-leave-btn");
+  ui.onlineRoomUrlBtn = document.getElementById("online-room-url-btn");
   ui.gameSummaryToggle = document.getElementById("game-summary-toggle");
   ui.mainMenuBtn = document.getElementById("main-menu-btn");
   ui.gameSummaryPanel = document.getElementById("game-summary-panel");
@@ -2346,7 +2345,7 @@ function bindUI() {
   ui.contextZone.addEventListener("click", onContextActionClick);
   ui.gameSummaryToggle?.addEventListener("click", onToggleGameSummaryPanel);
   ui.mainMenuBtn?.addEventListener("click", onMainMenuFromHeader);
-  ui.onlineLeaveBtn?.addEventListener("click", onFriendBackToMenu);
+  ui.onlineRoomUrlBtn?.addEventListener("click", onOnlineRoomUrlCopy);
   ui.logToggle?.addEventListener("click", onToggleLogPanel);
   ui.codeToggle?.addEventListener("click", onToggleCodePanel);
   ui.copyLinkBtn?.addEventListener("click", onCopyLink);
@@ -2373,7 +2372,6 @@ function bindUI() {
     getOnlineStartController().setOnlineHostMovesFirst(false);
   });
   ui.onlineBackBtn?.addEventListener("click", onOnlineBackFromMenu);
-  ui.onlineRoomChip?.addEventListener("click", onOnlineRoomChipCopy);
   ui.startLoadBtn?.addEventListener("click", onStartLoadFromMenu);
   ui.startLoadManualBtn?.addEventListener("click", onStartLoadFromMenu);
   ui.friendLoadCodeBtn?.addEventListener("click", onFriendInterstitialLoadCode);
@@ -2717,19 +2715,19 @@ function onRtcReceiveTurnCode(rawPayload) {
   return getOnlineStartController().onRtcReceiveTurnCode(rawPayload);
 }
 
-async function onOnlineRoomChipCopy() {
-  const code = String(state.rtcRoomCode || "").trim().toUpperCase();
-  if (!code) return;
+async function onOnlineRoomUrlCopy() {
+  const link = String(buildOnlineInviteLink(state.rtcRoomCode) || "").trim();
+  if (!link) return;
   try {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(link);
       return;
     }
   } catch (_err) {
     // Fall back to execCommand path.
   }
   const temp = document.createElement("textarea");
-  temp.value = code;
+  temp.value = link;
   temp.setAttribute("readonly", "true");
   temp.style.position = "fixed";
   temp.style.opacity = "0";
@@ -4833,11 +4831,11 @@ function renderDocumentTitleAndOnlineRoomChip() {
   if (document.title !== nextTitle) {
     document.title = nextTitle;
   }
-  if (!ui.onlineRoomChip) return;
-  const showRoomChip = isOnlineFriendSessionActive() && Boolean(state.rtcRoomCode);
-  ui.onlineRoomChip.hidden = !showRoomChip;
-  if (!showRoomChip) return;
-  ui.onlineRoomChip.textContent = `Room ${state.rtcRoomCode} | Copy`;
+  if (!ui.onlineRoomUrlBtn) return;
+  const showRoomUrl = isOnlineFriendSessionActive();
+  const hasRoomCode = Boolean(String(state.rtcRoomCode || "").trim());
+  ui.onlineRoomUrlBtn.hidden = !showRoomUrl;
+  ui.onlineRoomUrlBtn.disabled = !showRoomUrl || !hasRoomCode;
 }
 
 function renderCodePanel() {
@@ -5216,12 +5214,6 @@ function renderTop() {
     const turnText = state.roundOver ? "round ended" : state.players[state.currentPlayer].name;
     ui.turnMeta.textContent = `Starts: ${state.players[state.dealer].name} | Turn: ${turnText}`;
   }
-  if (ui.onlineLeaveBtn) {
-    const showOnlineLeave = isOnlineFriendSessionActive() && !state.matchOver;
-    ui.onlineLeaveBtn.hidden = !showOnlineLeave;
-    ui.onlineLeaveBtn.disabled = !showOnlineLeave;
-  }
-
   ui.deckCount.textContent = `Deck: ${state.drawPile.length}`;
 
   ui.cpuCapturedCount.textContent = String(state.players[topPlayerIndex].captured.length);

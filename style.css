@@ -123,22 +123,6 @@ body {
   border-radius: 8px;
 }
 
-.online-room-chip {
-  position: fixed;
-  right: 10px;
-  bottom: max(10px, env(safe-area-inset-bottom));
-  z-index: 70;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  letter-spacing: 0.03em;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
-}
-
-.online-room-chip[hidden] {
-  display: none !important;
-}
-
 .subtitle {
   margin: 2px 0 0;
   font-size: 0.72rem;
