@@ -1782,12 +1782,6 @@ async function deleteSavedMatchFromCurrentGames(matchId) {
   if (!deleteId || currentGamesDeleteInFlight || currentGamesResumeInFlight) return;
   const mode = normalizeStartModeMenuMode(startModeMenuMode);
   if (!mode) return;
-  const confirmed = window.confirm(
-    mode === "online"
-      ? "Leave this online game and remove it from this device?"
-      : "Delete this saved game from this device?"
-  );
-  if (!confirmed) return;
   if (mode === "online") {
     const onlineEntry = currentGamesOnlineEntriesById.get(deleteId);
     currentGamesDeleteInFlight = true;
@@ -4452,7 +4446,31 @@ function isRoundTransitionReadyForAdvance() {
   return Boolean(state.roundTransition.acks?.local);
 }
 
-function markRoundTransitionReady(playerIndex = null) {
+async function writeOnlineRoundTransitionSnapshot(context) {
+  if (!isOnlineFriendSessionActive()) return true;
+  const rtc = getRtcBridge();
+  if (!rtc || typeof rtc.writeSnapshot !== "function") return false;
+  let code = "";
+  try {
+    code = encodeStateForOnline();
+  } catch (err) {
+    console.warn(`[online] ${context}: snapshot encode failed`, err);
+    return false;
+  }
+  try {
+    const roomSummary = typeof buildOnlineRoomSummaryFromState === "function" ? buildOnlineRoomSummaryFromState() : null;
+    const wroteSnapshot = await rtc.writeSnapshot(code, getOnlineSnapshotTurnIndex(), roomSummary);
+    if (!wroteSnapshot) {
+      console.warn(`[online] ${context}: snapshot write failed`);
+    }
+    return wroteSnapshot;
+  } catch (err) {
+    console.warn(`[online] ${context}: snapshot write threw`, err);
+    return false;
+  }
+}
+
+async function markRoundTransitionReady(playerIndex = null) {
   if (!state.roundTransition?.open || state.matchOver || !state.roundOver) return;
   if (!isFriendMode()) {
     state.roundTransition.acks.local = true;
@@ -4466,23 +4484,33 @@ function markRoundTransitionReady(playerIndex = null) {
   }
   if (normalized === null) return;
   if (onlineLocalPlayerIndex !== null && playerIndex !== null && playerIndex !== onlineLocalPlayerIndex) return;
+  if (normalized === 0) state.roundTransition.acks.p0 = true;
+  if (normalized === 1) state.roundTransition.acks.p1 = true;
   if (onlineLocalPlayerIndex !== null) {
-    const sent = sendRtcSignal({
+    sendRtcSignal({
       type: "round-ready",
       playerIndex: normalized,
       gameNumber: state.gameNumber,
       nextGameNumber: state.roundTransition.nextGameNumber,
     });
-    if (!sent) {
-      setFriendInterstitialStatus("Could not sync Ready signal. Try reconnecting or return to menu.", true);
+    const savedReadySnapshot = await writeOnlineRoundTransitionSnapshot("round-ready-ack");
+    if (!savedReadySnapshot) {
+      if (normalized === 0) state.roundTransition.acks.p0 = false;
+      if (normalized === 1) state.roundTransition.acks.p1 = false;
+      setFriendInterstitialStatus("Could not save Ready state. Retry in a moment.", true);
       renderAll();
       return;
     }
   }
-  if (normalized === 0) state.roundTransition.acks.p0 = true;
-  if (normalized === 1) state.roundTransition.acks.p1 = true;
   if (isRoundTransitionReadyForAdvance()) {
     onNextGame();
+    if (onlineLocalPlayerIndex !== null) {
+      const savedNextRoundSnapshot = await writeOnlineRoundTransitionSnapshot("round-ready-advance");
+      if (!savedNextRoundSnapshot) {
+        setFriendInterstitialStatus("Next game started, but sync save failed. Reconnect if this persists.", true);
+        renderAll();
+      }
+    }
     return;
   }
   const readyName = state.players[normalized]?.name || `P${normalized + 1}`;
@@ -5808,22 +5836,22 @@ function onContextActionClick(event) {
   const action = button.dataset.action;
 
   if (action === "round-ready-p0") {
-    markRoundTransitionReady(0);
+    void markRoundTransitionReady(0);
     return;
   }
 
   if (action === "round-ready-p1") {
-    markRoundTransitionReady(1);
+    void markRoundTransitionReady(1);
     return;
   }
 
   if (action === "round-ready-local") {
-    markRoundTransitionReady();
+    void markRoundTransitionReady();
     return;
   }
 
   if (action === "round-ready-online") {
-    markRoundTransitionReady();
+    void markRoundTransitionReady();
     return;
   }
 

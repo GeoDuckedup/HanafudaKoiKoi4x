@@ -655,6 +655,9 @@
         }
 
         if (snapshot && typeof snapshot.state === "string" && snapshot.state.trim()) {
+          if (stateSync && typeof stateSync.clearAppliedSnapshotMarkers === "function") {
+            stateSync.clearAppliedSnapshotMarkers();
+          }
           applyOnlineSnapshotFromFirebase(snapshot, "reconnect");
           return true;
         }
