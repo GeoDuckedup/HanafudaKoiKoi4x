@@ -68,6 +68,7 @@
       prepareFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex);
       if (!isOnlineFriendSessionActive()) {
         state.rtcWaiting = false;
+        state.rtcTurnSaveInFlight = false;
         renderAll();
         return;
       }
@@ -76,6 +77,7 @@
       if (!rtc || typeof rtc.writeSnapshot !== "function") {
         setFriendInterstitialStatus("Online transport unavailable. Return to menu and reconnect.", true);
         state.rtcWaiting = false;
+        state.rtcTurnSaveInFlight = false;
         renderAll();
         return;
       }
@@ -86,10 +88,12 @@
       } catch (err) {
         setFriendInterstitialStatus(`Could not send turn: ${err.message}`, true);
         state.rtcWaiting = false;
+        state.rtcTurnSaveInFlight = false;
         renderAll();
         return;
       }
       state.rtcWaiting = false;
+      state.rtcTurnSaveInFlight = true;
       setFriendInterstitialStatus("Saving turn...", false);
       renderAll();
       void Promise.resolve().then(async () => {
@@ -100,10 +104,12 @@
         const wroteSnapshot = await rtc.writeSnapshot(code, snapshotTurnIndex, snapshotSummary);
         if (!wroteSnapshot) {
           state.rtcWaiting = false;
+          state.rtcTurnSaveInFlight = false;
           setFriendInterstitialStatus("Could not save turn. Retry in a moment.", true);
           renderAll();
           return;
         }
+        state.rtcTurnSaveInFlight = false;
         state.rtcWaiting = true;
         if (state.rtcStatus === "connected" && typeof rtc.sendTurnCode === "function") {
           const sent = rtc.sendTurnCode(code);
@@ -119,6 +125,7 @@
       }).catch((err) => {
         console.warn("online handoff send failed", err);
         state.rtcWaiting = false;
+        state.rtcTurnSaveInFlight = false;
         setFriendInterstitialStatus("Could not save turn. Retry in a moment.", true);
         renderAll();
       });
@@ -164,6 +171,7 @@
 
     function onFriendInterstitialContinue() {
       if (!isFriendMode() || !state.interstitial?.open) return;
+      if (state.rtcTurnSaveInFlight) return;
       if (state.rtcWaiting) return;
       if (isOnlineFriendSessionActive() && (state.rtcStatus === "disconnected" || state.rtcStatus === "error")) return;
       const nextPlayerIndex =

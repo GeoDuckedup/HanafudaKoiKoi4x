@@ -637,6 +637,7 @@
       state.rtcRoomCode = normalizedRoomCode;
       state.rtcPendingStart = false;
       state.rtcWaiting = true;
+      state.rtcTurnSaveInFlight = false;
       state.rtcInitSent = false;
       state.rtcInitApplied = false;
       state.rtcReconnectFailed = false;
@@ -655,9 +656,6 @@
         }
 
         if (snapshot && typeof snapshot.state === "string" && snapshot.state.trim()) {
-          if (stateSync && typeof stateSync.clearAppliedSnapshotMarkers === "function") {
-            stateSync.clearAppliedSnapshotMarkers();
-          }
           applyOnlineSnapshotFromFirebase(snapshot, "reconnect");
           return true;
         }
@@ -683,6 +681,7 @@
         state.rtcOpponentAbandoned = false;
         state.rtcOpponentAbandonedBy = "";
         state.rtcWaiting = true;
+        state.rtcTurnSaveInFlight = false;
         state.rtcPendingStart = false;
         state.rtcInitSent = false;
         state.rtcInitApplied = false;

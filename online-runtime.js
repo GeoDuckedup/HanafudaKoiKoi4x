@@ -94,6 +94,7 @@
       state.rtcRole = null;
       state.rtcRoomCode = "";
       state.rtcWaiting = false;
+      state.rtcTurnSaveInFlight = false;
       state.rtcPendingStart = false;
       state.rtcInitSent = false;
       state.rtcInitApplied = false;

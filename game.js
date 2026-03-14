@@ -4915,6 +4915,7 @@ function computeTurnCheckpointReady() {
 function renderFriendInterstitial() {
   if (!ui.friendInterstitial) return;
   const waitingOnline = isFriendMode() && state.rtcWaiting;
+  const savingOnlineTurn = isOnlineFriendSessionActive() && Boolean(state.rtcTurnSaveInFlight);
   const recoveryOnline =
     isOnlineFriendSessionActive() && (state.rtcStatus === "disconnected" || state.rtcStatus === "error");
   const open = isFriendMode() && (Boolean(state.interstitial?.open) || waitingOnline || recoveryOnline);
@@ -5005,6 +5006,34 @@ function renderFriendInterstitial() {
       ui.friendBackMenuBtn.hidden = false;
       ui.friendBackMenuBtn.disabled = false;
       ui.friendBackMenuBtn.textContent = "Return to Menu";
+    }
+    return;
+  }
+  if (savingOnlineTurn) {
+    if (ui.friendInterstitialTitle) {
+      ui.friendInterstitialTitle.textContent = "Saving Turn";
+    }
+    if (ui.friendInterstitialText) {
+      ui.friendInterstitialText.textContent = "Saving your turn to the room. Please wait...";
+    }
+    if (ui.friendContinueBtn) {
+      ui.friendContinueBtn.hidden = true;
+      ui.friendContinueBtn.disabled = true;
+    }
+    if (ui.friendLoadCodeBtn) {
+      ui.friendLoadCodeBtn.hidden = true;
+      ui.friendLoadCodeBtn.disabled = true;
+    }
+    if (ui.friendCopyCodeBtn) {
+      ui.friendCopyCodeBtn.hidden = false;
+      ui.friendCopyCodeBtn.disabled = !String(state.rtcRoomCode || "").trim();
+      ui.friendCopyCodeBtn.textContent = "Copy Game URL";
+    }
+    if (ui.friendManualLoadWrap) ui.friendManualLoadWrap.hidden = true;
+    if (ui.friendBackMenuBtn) {
+      ui.friendBackMenuBtn.hidden = false;
+      ui.friendBackMenuBtn.disabled = false;
+      ui.friendBackMenuBtn.textContent = "Back to Menu";
     }
     return;
   }

@@ -62,12 +62,16 @@
       const markInitApplied = options.markInitApplied !== false;
       const hasTurnIndex = Number.isFinite(Number(options.turnIndex));
       const normalizedTurnIndex = hasTurnIndex ? Math.max(0, Math.floor(Number(options.turnIndex))) : null;
+      const allowSameTurnNewKey = options.allowSameTurnNewKey === true;
       const snapshotKey = computeSnapshotKey(normalizedStateCode);
       const priorKey = String(state.rtcLastAppliedSnapshotKey || "");
       const priorTurnIndex = Number(state.rtcLastAppliedSnapshotTurnIndex);
+      const hasPriorTurnIndex = Number.isFinite(priorTurnIndex) && priorTurnIndex >= 0;
       const duplicateByKey = Boolean(snapshotKey) && snapshotKey === priorKey;
-      const duplicateByTurnIndex = hasTurnIndex && Number.isFinite(priorTurnIndex) && priorTurnIndex >= normalizedTurnIndex;
-      if (duplicateByKey || duplicateByTurnIndex) {
+      const olderTurn = hasTurnIndex && hasPriorTurnIndex && normalizedTurnIndex < priorTurnIndex;
+      const sameTurn = hasTurnIndex && hasPriorTurnIndex && normalizedTurnIndex === priorTurnIndex;
+      const sameTurnDuplicate = sameTurn && (duplicateByKey || !allowSameTurnNewKey);
+      if (duplicateByKey || olderTurn || sameTurnDuplicate) {
         return {
           applied: false,
           duplicate: true,
@@ -89,6 +93,7 @@
       }
       state.rtcPendingStart = false;
       state.rtcReconnectFailed = false;
+      state.rtcTurnSaveInFlight = false;
       if (markInitApplied) {
         state.rtcInitApplied = true;
       }
@@ -122,6 +127,7 @@
       return applyAuthoritativeSnapshot(payload.state, {
         reason: options.reason || "reconnect",
         turnIndex,
+        allowSameTurnNewKey: true,
         markInitApplied: true,
       });
     }
