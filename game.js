@@ -541,6 +541,8 @@ let currentGamesResumeInFlight = false;
 let currentGamesDeleteInFlight = false;
 const currentGamesHandCountCache = new Map();
 const currentGamesOnlineEntriesById = new Map();
+const LOCAL_PASS_AND_PLAY_UI_ENABLED = false;
+const LOCAL_PASS_AND_PLAY_AUTOSAVE_ENABLED = false;
 let startModeMenuMode = null;
 let startModeLoadActive = false;
 
@@ -893,11 +895,11 @@ function getSavesBridge() {
 
 function isDeviceCurrentGamesMatch(entry) {
   if (!entry || typeof entry !== "object") return false;
-  return entry.mode === "cpu" || entry.mode === "local" || entry.mode === "online";
+  return entry.mode === "cpu" || entry.mode === "online";
 }
 
 function normalizeStartModeMenuMode(mode) {
-  if (mode === "cpu" || mode === "local" || mode === "online") return mode;
+  if (mode === "cpu" || mode === "online") return mode;
   return null;
 }
 
@@ -2041,6 +2043,14 @@ function isLocalPassAndPlayMode() {
   return isFriendMode() && !isOnlineFriendSessionActive();
 }
 
+function isLocalPassAndPlayUiEnabled() {
+  return LOCAL_PASS_AND_PLAY_UI_ENABLED;
+}
+
+function isLocalPassAndPlayAutosaveEnabled() {
+  return LOCAL_PASS_AND_PLAY_AUTOSAVE_ENABLED && isLocalPassAndPlayMode();
+}
+
 function generateLocalSaveMatchId() {
   const now = Date.now().toString(36).toUpperCase();
   if (window.crypto && typeof window.crypto.getRandomValues === "function") {
@@ -2159,7 +2169,7 @@ function normalizeLocalResumeStateForSafety() {
 
 async function persistLocalAutosave(reason, options = {}) {
   const { force = false } = options;
-  if (!isLocalPassAndPlayMode()) return false;
+  if (!isLocalPassAndPlayAutosaveEnabled()) return false;
   if (state.matchOver) return false;
   if (!force && !isLocalAutosaveSafeCheckpoint()) return false;
   const saves = getSavesBridge();
@@ -2673,6 +2683,11 @@ function onStartModeCpuFromMenu() {
 
 function onStartModeFriendFromMenu() {
   if (!state.ready) return;
+  if (!isLocalPassAndPlayUiEnabled()) {
+    setStartCurrentGamesPanelOpen(false);
+    setStartCurrentGamesStatus("", false);
+    return;
+  }
   if (!ui.startCurrentGamesPanel?.hidden && startModeMenuMode === "local") {
     setStartCurrentGamesPanelOpen(false);
     return;
