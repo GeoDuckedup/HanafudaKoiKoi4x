@@ -763,6 +763,23 @@ button.ghost {
   margin-bottom: 6px;
 }
 
+.deck-panel {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.deck-panel[hidden] {
+  display: none !important;
+}
+
+.deck-panel-head {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #4f2a15;
+}
+
 .summary-table-wrap {
   max-height: 36vh;
   overflow: auto;
@@ -1117,6 +1134,80 @@ button.ghost {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.deck-picker-panel {
+  margin-top: 2px;
+}
+
+.deck-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(40dvh, 320px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+
+.deck-picker-row {
+  width: 100%;
+  border: 1px solid #b49362;
+  border-radius: 8px;
+  background: #fffdf7;
+  color: #1f1a14;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.deck-picker-row.is-selected {
+  border-color: #8c2f1e;
+  background: #fff2e4;
+  box-shadow: inset 0 0 0 1px rgba(140, 47, 30, 0.18);
+}
+
+.deck-picker-row:disabled {
+  opacity: 0.75;
+}
+
+.deck-picker-thumb {
+  width: 58px;
+  height: 72px;
+  border-radius: 6px;
+  border: 1px solid #8f6d44;
+  object-fit: cover;
+  object-position: center;
+  background: #f3e2c7;
+}
+
+.deck-picker-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.deck-picker-title {
+  font-size: 0.77rem;
+  font-weight: 800;
+  color: #3f2d1a;
+}
+
+.deck-picker-subtitle {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #6b5338;
+}
+
+.deck-picker-check {
+  font-size: 0.7rem;
+  font-weight: 900;
+  color: #8c2f1e;
+  letter-spacing: 0.04em;
 }
 
 .current-games-chip {
