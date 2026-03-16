@@ -1,90 +1,94 @@
-const SHEET_PATHS = {
-  janCustom: "assets/custom/january.png",
-  m02Custom: "assets/custom/february.png",
-  m03Custom: "assets/custom/march.png",
-  m04Custom: "assets/custom/april.png",
-  m05Custom: "assets/custom/may.png",
-  m06Custom: "assets/custom/june.png",
-  m07Custom: "assets/custom/july.png",
-  m08Custom: "assets/custom/august.jpg",
-  m09Custom: "assets/custom/september.png",
-  m10Custom: "assets/custom/october.png",
-  m11Custom: "assets/custom/november.png",
-  m12Custom: "assets/custom/december.png",
+const CLASSIC_DECK_ID = "classic";
+const RETRO8BIT_DECK_ID = "retro8bit";
+const SELECTED_DECK_STORAGE_KEY = "hkk_selected_deck";
+
+const CLASSIC_SHEET_PATHS = {
+  jan: "assets/decks/classic/january.png",
+  feb: "assets/decks/classic/february.png",
+  mar: "assets/decks/classic/march.png",
+  apr: "assets/decks/classic/april.png",
+  may: "assets/decks/classic/may.png",
+  jun: "assets/decks/classic/june.png",
+  jul: "assets/decks/classic/july.png",
+  aug: "assets/decks/classic/august.jpg",
+  sep: "assets/decks/classic/september.png",
+  oct: "assets/decks/classic/october.png",
+  nov: "assets/decks/classic/november.png",
+  dec: "assets/decks/classic/december.png",
 };
 
-const MONTH_SPRITES = {
+const CLASSIC_MONTH_SPRITES = {
   1: [
-    { sheet: "janCustom", x: 141, y: 14, w: 360, h: 487 },
-    { sheet: "janCustom", x: 522, y: 14, w: 360, h: 487 },
-    { sheet: "janCustom", x: 141, y: 521, w: 360, h: 484 },
-    { sheet: "janCustom", x: 521, y: 521, w: 361, h: 484 },
+    { sheet: "jan", x: 141, y: 14, w: 360, h: 487 },
+    { sheet: "jan", x: 522, y: 14, w: 360, h: 487 },
+    { sheet: "jan", x: 141, y: 521, w: 360, h: 484 },
+    { sheet: "jan", x: 521, y: 521, w: 361, h: 484 },
   ],
   2: [
-    { sheet: "m02Custom", x: 521, y: 779, w: 408, h: 630 },
-    { sheet: "m02Custom", x: 94, y: 779, w: 407, h: 630 },
-    { sheet: "m02Custom", x: 95, y: 127, w: 407, h: 627 },
-    { sheet: "m02Custom", x: 521, y: 127, w: 408, h: 627 },
+    { sheet: "feb", x: 521, y: 779, w: 408, h: 630 },
+    { sheet: "feb", x: 94, y: 779, w: 407, h: 630 },
+    { sheet: "feb", x: 95, y: 127, w: 407, h: 627 },
+    { sheet: "feb", x: 521, y: 127, w: 408, h: 627 },
   ],
   3: [
-    { sheet: "m03Custom", x: 523, y: 14, w: 359, h: 487 },
-    { sheet: "m03Custom", x: 523, y: 522, w: 359, h: 483 },
-    { sheet: "m03Custom", x: 141, y: 14, w: 359, h: 487 },
-    { sheet: "m03Custom", x: 141, y: 522, w: 359, h: 483 },
+    { sheet: "mar", x: 523, y: 14, w: 359, h: 487 },
+    { sheet: "mar", x: 523, y: 522, w: 359, h: 483 },
+    { sheet: "mar", x: 141, y: 14, w: 359, h: 487 },
+    { sheet: "mar", x: 141, y: 522, w: 359, h: 483 },
   ],
   4: [
-    { sheet: "m04Custom", x: 94, y: 126, w: 409, h: 629 },
-    { sheet: "m04Custom", x: 94, y: 782, w: 408, h: 625 },
-    { sheet: "m04Custom", x: 520, y: 126, w: 409, h: 629 },
-    { sheet: "m04Custom", x: 520, y: 782, w: 409, h: 626 },
+    { sheet: "apr", x: 94, y: 126, w: 409, h: 629 },
+    { sheet: "apr", x: 94, y: 782, w: 408, h: 625 },
+    { sheet: "apr", x: 520, y: 126, w: 409, h: 629 },
+    { sheet: "apr", x: 520, y: 782, w: 409, h: 626 },
   ],
   5: [
-    { sheet: "m05Custom", x: 94, y: 126, w: 407, h: 629 },
-    { sheet: "m05Custom", x: 94, y: 781, w: 413, h: 636 },
-    { sheet: "m05Custom", x: 520, y: 126, w: 410, h: 632 },
-    { sheet: "m05Custom", x: 520, y: 780, w: 411, h: 636 },
+    { sheet: "may", x: 94, y: 126, w: 407, h: 629 },
+    { sheet: "may", x: 94, y: 781, w: 413, h: 636 },
+    { sheet: "may", x: 520, y: 126, w: 410, h: 632 },
+    { sheet: "may", x: 520, y: 780, w: 411, h: 636 },
   ],
   6: [
-    { sheet: "m06Custom", x: 145, y: 15, w: 360, h: 486 },
-    { sheet: "m06Custom", x: 144, y: 523, w: 359, h: 482 },
-    { sheet: "m06Custom", x: 526, y: 15, w: 360, h: 486 },
-    { sheet: "m06Custom", x: 524, y: 523, w: 361, h: 481 },
+    { sheet: "jun", x: 145, y: 15, w: 360, h: 486 },
+    { sheet: "jun", x: 144, y: 523, w: 359, h: 482 },
+    { sheet: "jun", x: 526, y: 15, w: 360, h: 486 },
+    { sheet: "jun", x: 524, y: 523, w: 361, h: 481 },
   ],
   7: [
-    { sheet: "m07Custom", x: 141, y: 15, w: 359, h: 486 },
-    { sheet: "m07Custom", x: 521, y: 15, w: 361, h: 486 },
-    { sheet: "m07Custom", x: 141, y: 521, w: 359, h: 483 },
-    { sheet: "m07Custom", x: 521, y: 521, w: 361, h: 483 },
+    { sheet: "jul", x: 141, y: 15, w: 359, h: 486 },
+    { sheet: "jul", x: 521, y: 15, w: 361, h: 486 },
+    { sheet: "jul", x: 141, y: 521, w: 359, h: 483 },
+    { sheet: "jul", x: 521, y: 521, w: 361, h: 483 },
   ],
   8: [
-    { sheet: "m08Custom", x: 140, y: 16, w: 361, h: 485 },
-    { sheet: "m08Custom", x: 521, y: 15, w: 361, h: 486 },
-    { sheet: "m08Custom", x: 138, y: 523, w: 363, h: 479 },
-    { sheet: "m08Custom", x: 521, y: 523, w: 362, h: 479 },
+    { sheet: "aug", x: 140, y: 16, w: 361, h: 485 },
+    { sheet: "aug", x: 521, y: 15, w: 361, h: 486 },
+    { sheet: "aug", x: 138, y: 523, w: 363, h: 479 },
+    { sheet: "aug", x: 521, y: 523, w: 362, h: 479 },
   ],
   9: [
-    { sheet: "m09Custom", x: 155, y: 15, w: 357, h: 485 },
-    { sheet: "m09Custom", x: 155, y: 521, w: 357, h: 482 },
-    { sheet: "m09Custom", x: 534, y: 15, w: 357, h: 485 },
-    { sheet: "m09Custom", x: 534, y: 521, w: 357, h: 482 },
+    { sheet: "sep", x: 155, y: 15, w: 357, h: 485 },
+    { sheet: "sep", x: 155, y: 521, w: 357, h: 482 },
+    { sheet: "sep", x: 534, y: 15, w: 357, h: 485 },
+    { sheet: "sep", x: 534, y: 521, w: 357, h: 482 },
   ],
   10: [
-    { sheet: "m10Custom", x: 425, y: 103, w: 333, h: 513 },
-    { sheet: "m10Custom", x: 79, y: 635, w: 331, h: 511 },
-    { sheet: "m10Custom", x: 80, y: 103, w: 330, h: 513 },
-    { sheet: "m10Custom", x: 425, y: 634, w: 333, h: 512 },
+    { sheet: "oct", x: 425, y: 103, w: 333, h: 513 },
+    { sheet: "oct", x: 79, y: 635, w: 331, h: 511 },
+    { sheet: "oct", x: 80, y: 103, w: 330, h: 513 },
+    { sheet: "oct", x: 425, y: 634, w: 333, h: 512 },
   ],
   11: [
-    { sheet: "m11Custom", x: 74, y: 63, w: 333, h: 550 },
-    { sheet: "m11Custom", x: 423, y: 63, w: 333, h: 550 },
-    { sheet: "m11Custom", x: 74, y: 631, w: 333, h: 559 },
-    { sheet: "m11Custom", x: 423, y: 631, w: 333, h: 559 },
+    { sheet: "nov", x: 74, y: 63, w: 333, h: 550 },
+    { sheet: "nov", x: 423, y: 63, w: 333, h: 550 },
+    { sheet: "nov", x: 74, y: 631, w: 333, h: 559 },
+    { sheet: "nov", x: 423, y: 631, w: 333, h: 559 },
   ],
   12: [
-    { sheet: "m12Custom", x: 520, y: 781, w: 409, h: 628 },
-    { sheet: "m12Custom", x: 95, y: 127, w: 409, h: 632 },
-    { sheet: "m12Custom", x: 520, y: 127, w: 409, h: 633 },
-    { sheet: "m12Custom", x: 94, y: 780, w: 407, h: 629 },
+    { sheet: "dec", x: 520, y: 781, w: 409, h: 628 },
+    { sheet: "dec", x: 95, y: 127, w: 409, h: 632 },
+    { sheet: "dec", x: 520, y: 127, w: 409, h: 633 },
+    { sheet: "dec", x: 94, y: 780, w: 407, h: 629 },
   ],
 };
 
@@ -237,6 +241,89 @@ const MONTH_CARD_DEFS = [
   },
 ];
 
+const RETRO8BIT_SHEET_PATHS = Object.freeze({
+  jan: "assets/decks/retro8bit/january.png",
+  feb: "assets/decks/retro8bit/February.png",
+  mar: "assets/decks/retro8bit/March.png",
+  apr: "assets/decks/retro8bit/April.png",
+  may: "assets/decks/retro8bit/May.png",
+  jun: "assets/decks/retro8bit/June.png",
+  jul: "assets/decks/retro8bit/July.png",
+  aug: "assets/decks/retro8bit/August.jpg",
+  sep: "assets/decks/retro8bit/September.png",
+  oct: "assets/decks/retro8bit/October.png",
+  nov: "assets/decks/retro8bit/November.png",
+  dec: "assets/decks/retro8bit/December.png",
+});
+
+const RETRO8BIT_MONTH_SHEETS = Object.freeze({
+  1: "jan",
+  2: "feb",
+  3: "mar",
+  4: "apr",
+  5: "may",
+  6: "jun",
+  7: "jul",
+  8: "aug",
+  9: "sep",
+  10: "oct",
+  11: "nov",
+  12: "dec",
+});
+
+const RETRO8BIT_MONTH_LABELS = Object.freeze({
+  jan: "January",
+  feb: "February",
+  mar: "March",
+  apr: "April",
+  may: "May",
+  jun: "June",
+  jul: "July",
+  aug: "August",
+  sep: "September",
+  oct: "October",
+  nov: "November",
+  dec: "December",
+});
+
+function buildDeckOverrideSpritesByCardId(baseMonthSprites, overrideMonthSheets) {
+  const spritesByCardId = {};
+  for (const [monthValue, sheetId] of Object.entries(overrideMonthSheets)) {
+    const monthNumber = Number(monthValue);
+    const monthSprites = baseMonthSprites[monthNumber];
+    if (!Array.isArray(monthSprites)) continue;
+    monthSprites.forEach((sprite, index) => {
+      const cardCode = String.fromCharCode(97 + index);
+      spritesByCardId[`${monthNumber}${cardCode}`] = { ...sprite, sheet: sheetId };
+    });
+  }
+  return spritesByCardId;
+}
+
+const RETRO8BIT_SPRITES_BY_CARD_ID = Object.freeze(
+  buildDeckOverrideSpritesByCardId(CLASSIC_MONTH_SPRITES, RETRO8BIT_MONTH_SHEETS)
+);
+
+const CLASSIC_SPRITES_BY_CARD_ID = Object.freeze(buildSpritesByCardId(CLASSIC_MONTH_SPRITES));
+const DECK_DEFS = Object.freeze({
+  [CLASSIC_DECK_ID]: Object.freeze({
+    id: CLASSIC_DECK_ID,
+    label: "Classic",
+    shortLabel: "Classic",
+    thumbPath: CLASSIC_SHEET_PATHS.jan,
+    sheetPaths: Object.freeze({ ...CLASSIC_SHEET_PATHS }),
+    spritesByCardId: CLASSIC_SPRITES_BY_CARD_ID,
+  }),
+  [RETRO8BIT_DECK_ID]: Object.freeze({
+    id: RETRO8BIT_DECK_ID,
+    label: "Retro 8-Bit",
+    shortLabel: "8-Bit",
+    thumbPath: RETRO8BIT_SHEET_PATHS.jan,
+    sheetPaths: Object.freeze({ ...RETRO8BIT_SHEET_PATHS }),
+    spritesByCardId: RETRO8BIT_SPRITES_BY_CARD_ID,
+  }),
+});
+
 const CARD_DECK = buildDeck();
 const CARD_BY_ID = new Map(CARD_DECK.map((card) => [card.id, card]));
 
@@ -281,6 +368,10 @@ const ONLINE_STORAGE_ROOM_KEY = "hkk_online_room";
 const ONLINE_STORAGE_ROLE_KEY = "hkk_online_role";
 const CPU_SAVE_TITLE = "vs CPU";
 const LOCAL_SAVE_TITLE = "Local Match";
+const DEV_DECK_MODE =
+  window.location.protocol === "file:" ||
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1";
 
 const drawPreviewFx = {
   lastCardId: null,
@@ -300,12 +391,7 @@ document.addEventListener("DOMContentLoaded", init);
 function buildDeck() {
   const cards = [];
   for (const monthDef of MONTH_CARD_DEFS) {
-    const monthSprites = MONTH_SPRITES[monthDef.month];
-    if (!monthSprites || monthSprites.length !== monthDef.cards.length) {
-      throw new Error(`Missing custom sprite mapping for month ${monthDef.month}`);
-    }
-    monthDef.cards.forEach((card, index) => {
-      const sprite = monthSprites[index];
+    monthDef.cards.forEach((card) => {
       cards.push({
         id: `${monthDef.month}${card.code}`,
         month: monthDef.month,
@@ -314,11 +400,24 @@ function buildDeck() {
         scrollKind: card.scrollKind || null,
         canAlsoBeBasic: Boolean(card.canAlsoBeBasic),
         isRainLight: Boolean(card.isRainLight),
-        sprite,
       });
     });
   }
   return cards;
+}
+
+function buildSpritesByCardId(monthSprites) {
+  const spritesByCardId = {};
+  for (const monthDef of MONTH_CARD_DEFS) {
+    const monthEntries = monthSprites[monthDef.month];
+    if (!monthEntries || monthEntries.length !== monthDef.cards.length) {
+      throw new Error(`Missing sprite mapping for month ${monthDef.month}`);
+    }
+    monthDef.cards.forEach((card, index) => {
+      spritesByCardId[`${monthDef.month}${card.code}`] = Object.freeze({ ...monthEntries[index] });
+    });
+  }
+  return spritesByCardId;
 }
 
 function init() {
@@ -326,9 +425,20 @@ function init() {
   bindUI();
   bindRtcBridge();
   bindFirebaseOnlineAuth();
+  state.selectedDeckId = readPersistedSelectedDeckId();
+  primeDeckThumbCache();
+  validateDeckDefinitions();
   preloadSheets()
     .then(async () => {
+      if (getSelectedDeckId() !== CLASSIC_DECK_ID) {
+        await ensureDeckAssetsLoaded(getSelectedDeckId()).catch((err) => {
+          console.warn(`[deck] Failed to preload ${getSelectedDeckId()} on boot. Falling back to classic.`, err);
+          state.selectedDeckId = CLASSIC_DECK_ID;
+          persistSelectedDeckId(CLASSIC_DECK_ID);
+        });
+      }
       state.ready = true;
+      renderDeckUi();
       const reconnectResult = await attemptOnlineResumeOnLoad();
       if (!reconnectResult.resumed) {
         showStartMenu();
@@ -360,10 +470,220 @@ function init() {
       addSystemLog(`Could not load card images: ${err.message}`);
       renderActionLog();
       setCodeStatus(`Asset load failed: ${err.message}`, true, "start");
+      setDeckStatus(`Deck load failed: ${err.message}`, true);
     });
 
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
+}
+
+function getDeckDef(deckId) {
+  return DECK_DEFS[normalizeDeckId(deckId)] || DECK_DEFS[CLASSIC_DECK_ID];
+}
+
+function normalizeDeckId(deckId) {
+  const nextDeckId = String(deckId || "").trim();
+  return DECK_DEFS[nextDeckId] ? nextDeckId : CLASSIC_DECK_ID;
+}
+
+function getSelectedDeckId() {
+  return normalizeDeckId(state.selectedDeckId);
+}
+
+function getSelectedDeckDef() {
+  return getDeckDef(getSelectedDeckId());
+}
+
+function readPersistedSelectedDeckId() {
+  try {
+    return normalizeDeckId(window.localStorage?.getItem(SELECTED_DECK_STORAGE_KEY) || CLASSIC_DECK_ID);
+  } catch (_err) {
+    return CLASSIC_DECK_ID;
+  }
+}
+
+function persistSelectedDeckId(deckId) {
+  const safeDeckId = normalizeDeckId(deckId);
+  try {
+    window.localStorage?.setItem(SELECTED_DECK_STORAGE_KEY, safeDeckId);
+  } catch (_err) {
+    // Ignore storage failures; deck choice is cosmetic only.
+  }
+}
+
+function primeDeckThumbCache() {
+  for (const deckDef of Object.values(DECK_DEFS)) {
+    state.deckThumbs[deckDef.id] = deckDef.thumbPath;
+  }
+}
+
+function setDeckStatus(message, isError) {
+  state.deckStatusMessage = String(message || "");
+  state.deckStatusError = Boolean(message && isError);
+  renderDeckUi();
+}
+
+async function ensureDeckAssetsLoaded(deckId) {
+  const safeDeckId = normalizeDeckId(deckId);
+  const deckDef = getDeckDef(safeDeckId);
+  state.deckSheets[safeDeckId] ??= {};
+  const sheetCache = state.deckSheets[safeDeckId];
+  const tasks = Object.entries(deckDef.sheetPaths).map(([sheetId, assetPath]) => {
+    if (sheetCache[sheetId]) {
+      return Promise.resolve(sheetCache[sheetId]);
+    }
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        sheetCache[sheetId] = img;
+        resolve(img);
+      };
+      img.onerror = () => reject(new Error(`missing ${assetPath}`));
+      img.src = assetPath;
+    });
+  });
+  await Promise.all(tasks);
+  if (safeDeckId === RETRO8BIT_DECK_ID && !state.deckOverrideDebugLogged) {
+    let loggedSheet = false;
+    for (const [monthValue, sheetId] of Object.entries(RETRO8BIT_MONTH_SHEETS)) {
+      const loadedSheet = sheetCache[sheetId];
+      if (!loadedSheet) continue;
+      const monthNumber = Number(monthValue);
+      const mappings = {
+        [`${monthNumber}a`]: RETRO8BIT_SPRITES_BY_CARD_ID[`${monthNumber}a`],
+        [`${monthNumber}b`]: RETRO8BIT_SPRITES_BY_CARD_ID[`${monthNumber}b`],
+        [`${monthNumber}c`]: RETRO8BIT_SPRITES_BY_CARD_ID[`${monthNumber}c`],
+        [`${monthNumber}d`]: RETRO8BIT_SPRITES_BY_CARD_ID[`${monthNumber}d`],
+      };
+      console.info(`[deck] Retro ${RETRO8BIT_MONTH_LABELS[sheetId] || sheetId} sheet loaded`, {
+        width: loadedSheet.naturalWidth,
+        height: loadedSheet.naturalHeight,
+        cropSource: "classic-layout override",
+        mappings,
+      });
+      loggedSheet = true;
+    }
+    if (loggedSheet) {
+      state.deckOverrideDebugLogged = true;
+    }
+  }
+  return sheetCache;
+}
+
+function getLoadedDeckSheet(deckId, sheetId) {
+  return state.deckSheets?.[deckId]?.[sheetId] || null;
+}
+
+function resolveCardSprite(cardId, deckId = getSelectedDeckId()) {
+  const safeDeckId = normalizeDeckId(deckId);
+  const deckDef = getDeckDef(safeDeckId);
+  const explicitSprite = deckDef.spritesByCardId[cardId];
+  if (explicitSprite) {
+    return { ...explicitSprite, deckId: safeDeckId };
+  }
+  const classicSprite = DECK_DEFS[CLASSIC_DECK_ID].spritesByCardId[cardId];
+  return classicSprite ? { ...classicSprite, deckId: CLASSIC_DECK_ID } : null;
+}
+
+async function setSelectedDeck(deckId) {
+  const safeDeckId = normalizeDeckId(deckId);
+  try {
+    await ensureDeckAssetsLoaded(safeDeckId);
+    state.selectedDeckId = safeDeckId;
+    persistSelectedDeckId(safeDeckId);
+    setDeckStatus(`${getDeckDef(safeDeckId).label} ready.`, false);
+  } catch (err) {
+    console.warn(`[deck] Failed to load ${safeDeckId}. Falling back to classic.`, err);
+    await ensureDeckAssetsLoaded(CLASSIC_DECK_ID);
+    state.selectedDeckId = CLASSIC_DECK_ID;
+    persistSelectedDeckId(CLASSIC_DECK_ID);
+    setDeckStatus(`Could not load ${getDeckDef(safeDeckId).label}. Using Classic.`, true);
+  }
+  renderAll();
+}
+
+function validateDeckDefinitions() {
+  if (state.deckValidationLogged) return;
+  const cardIds = new Set(CARD_DECK.map((card) => card.id));
+  const classicDeck = DECK_DEFS[CLASSIC_DECK_ID];
+  const validationWarnings = [];
+
+  for (const cardId of cardIds) {
+    if (!classicDeck.spritesByCardId[cardId]) {
+      throw new Error(`Classic deck is missing sprite mapping for ${cardId}`);
+    }
+  }
+
+  for (const deckDef of Object.values(DECK_DEFS)) {
+    const knownSheets = new Set(Object.keys(deckDef.sheetPaths));
+    for (const [cardId, sprite] of Object.entries(deckDef.spritesByCardId)) {
+      if (!cardIds.has(cardId)) {
+        validationWarnings.push(`[deck] ${deckDef.id} maps unknown card id ${cardId}`);
+      }
+      if (!knownSheets.has(sprite.sheet)) {
+        validationWarnings.push(`[deck] ${deckDef.id} sprite ${cardId} references unknown sheet ${sprite.sheet}`);
+      }
+    }
+    for (const cardId of cardIds) {
+      if (!resolveCardSprite(cardId, deckDef.id)) {
+        validationWarnings.push(`[deck] ${deckDef.id} cannot resolve sprite for ${cardId}`);
+      }
+    }
+  }
+
+  if (validationWarnings.length) {
+    const logger = DEV_DECK_MODE ? console.warn : console.info;
+    validationWarnings.forEach((warning) => logger(warning));
+  }
+  state.deckValidationLogged = true;
+}
+
+function getDeckPickerMarkup() {
+  const selectedDeckId = getSelectedDeckId();
+  return Object.values(DECK_DEFS)
+    .map((deckDef) => {
+      const isSelected = deckDef.id === selectedDeckId;
+      const previewLabel =
+        deckDef.id === RETRO8BIT_DECK_ID
+          ? `${Object.keys(RETRO8BIT_MONTH_SHEETS).length}-month classic-layout override set`
+          : "Original 12-month art set";
+      return `
+        <button type="button" class="deck-picker-row${isSelected ? " is-selected" : ""}" data-deck-id="${deckDef.id}">
+          <img class="deck-picker-thumb" src="${state.deckThumbs[deckDef.id] || deckDef.thumbPath}" alt="${deckDef.label} preview" loading="lazy" />
+          <span class="deck-picker-copy">
+            <span class="deck-picker-title">${deckDef.label}</span>
+            <span class="deck-picker-subtitle">${previewLabel}</span>
+          </span>
+          <span class="deck-picker-check">${isSelected ? "SELECTED" : ""}</span>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function renderDeckUi() {
+  const selectedDeck = getSelectedDeckDef();
+  if (ui.startDeckBtn) {
+    ui.startDeckBtn.textContent = `Choose Deck: ${selectedDeck.label}`;
+    ui.startDeckBtn.classList.toggle("primary", Boolean(ui.startDeckPanel && !ui.startDeckPanel.hidden));
+  }
+  if (ui.deckToggle) {
+    ui.deckToggle.textContent = `Deck: ${selectedDeck.shortLabel || selectedDeck.label}`;
+    ui.deckToggle.classList.toggle("primary", Boolean(ui.deckPanel && !ui.deckPanel.hidden));
+  }
+  const markup = getDeckPickerMarkup();
+  if (ui.startDeckList) {
+    ui.startDeckList.innerHTML = markup;
+  }
+  if (ui.deckPanelList) {
+    ui.deckPanelList.innerHTML = markup;
+  }
+  for (const node of [ui.startDeckStatus, ui.deckPanelStatus]) {
+    if (!node) continue;
+    node.textContent = state.deckStatusMessage || "";
+    node.classList.toggle("error", Boolean(state.deckStatusMessage && state.deckStatusError));
+    node.classList.toggle("success", Boolean(state.deckStatusMessage && !state.deckStatusError));
+  }
 }
 
 function getRtcBridge() {
@@ -925,6 +1245,7 @@ function updateStartModeButtonStates() {
   if (ui.startModeOnlineBtn) ui.startModeOnlineBtn.classList.toggle("primary", activeMode === "online");
   if (ui.startModeNewBtn) ui.startModeNewBtn.classList.toggle("primary", panelOpen && !startModeLoadActive);
   if (ui.startModeLoadBtn) ui.startModeLoadBtn.classList.toggle("primary", panelOpen && startModeLoadActive);
+  if (ui.startDeckBtn) ui.startDeckBtn.classList.toggle("primary", Boolean(ui.startDeckPanel && !ui.startDeckPanel.hidden));
 }
 
 function compareCurrentGamesMatches(a, b) {
@@ -1652,6 +1973,7 @@ function setStartCurrentGamesPanelOpen(open, mode = null) {
     setCurrentGamesCardsDisabled(false);
     return;
   }
+  setStartDeckPanelOpen(false);
   setStartOnlinePanelOpen(false);
   setStartManualLoadVisible(false);
   if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
@@ -1660,6 +1982,28 @@ function setStartCurrentGamesPanelOpen(open, mode = null) {
     ui.startCurrentGamesEmpty.textContent = "";
   }
   setStartCurrentGamesStatus("", false);
+}
+
+function setStartDeckPanelOpen(open) {
+  if (!ui.startDeckPanel) return;
+  const shouldOpen = Boolean(open);
+  ui.startDeckPanel.hidden = !shouldOpen;
+  if (shouldOpen) {
+    if (ui.startDeckBtn) {
+      ui.startDeckBtn.insertAdjacentElement("afterend", ui.startDeckPanel);
+    } else if (ui.startModeActions) {
+      ui.startModeActions.appendChild(ui.startDeckPanel);
+    }
+    setStartCurrentGamesPanelOpen(false);
+    setStartOnlinePanelOpen(false);
+    setStartManualLoadVisible(false);
+  }
+  renderDeckUi();
+}
+
+function onStartDeckToggleFromMenu() {
+  const nextOpen = ui.startDeckPanel?.hidden !== false;
+  setStartDeckPanelOpen(nextOpen);
 }
 
 function onStartModeNewGame() {
@@ -2250,6 +2594,10 @@ function cacheUI() {
   ui.onlineRoomUrlBtn = document.getElementById("online-room-url-btn");
   ui.gameSummaryToggle = document.getElementById("game-summary-toggle");
   ui.mainMenuBtn = document.getElementById("main-menu-btn");
+  ui.deckToggle = document.getElementById("deck-toggle");
+  ui.deckPanel = document.getElementById("deck-panel");
+  ui.deckPanelStatus = document.getElementById("deck-panel-status");
+  ui.deckPanelList = document.getElementById("deck-panel-list");
   ui.gameSummaryPanel = document.getElementById("game-summary-panel");
   ui.roundSummaryBody = document.getElementById("round-summary-body");
   ui.deckCount = document.getElementById("deck-count");
@@ -2303,6 +2651,10 @@ function cacheUI() {
   ui.startModeCpuBtn = document.getElementById("start-mode-cpu-btn");
   ui.startModeFriendBtn = document.getElementById("start-mode-friend-btn");
   ui.startModeOnlineBtn = document.getElementById("start-mode-online-btn");
+  ui.startDeckBtn = document.getElementById("start-deck-btn");
+  ui.startDeckPanel = document.getElementById("start-deck-panel");
+  ui.startDeckStatus = document.getElementById("start-deck-status");
+  ui.startDeckList = document.getElementById("start-deck-list");
   ui.startCurrentGamesPanel = document.getElementById("start-current-games-panel");
   ui.startCurrentGamesTitle = document.getElementById("start-current-games-title");
   ui.startModeNewBtn = document.getElementById("start-mode-new-btn");
@@ -2349,6 +2701,8 @@ function bindUI() {
   ui.contextZone.addEventListener("click", onContextActionClick);
   ui.gameSummaryToggle?.addEventListener("click", onToggleGameSummaryPanel);
   ui.mainMenuBtn?.addEventListener("click", onMainMenuFromHeader);
+  ui.deckToggle?.addEventListener("click", onToggleDeckPanel);
+  ui.deckPanelList?.addEventListener("click", onDeckPickerClick);
   ui.onlineRoomUrlBtn?.addEventListener("click", onOnlineRoomUrlCopy);
   ui.logToggle?.addEventListener("click", onToggleLogPanel);
   ui.codeToggle?.addEventListener("click", onToggleCodePanel);
@@ -2364,6 +2718,8 @@ function bindUI() {
   ui.startModeCpuBtn?.addEventListener("click", onStartModeCpuFromMenu);
   ui.startModeFriendBtn?.addEventListener("click", onStartModeFriendFromMenu);
   ui.startModeOnlineBtn?.addEventListener("click", onStartModeOnlineFromMenu);
+  ui.startDeckBtn?.addEventListener("click", onStartDeckToggleFromMenu);
+  ui.startDeckList?.addEventListener("click", onDeckPickerClick);
   ui.startModeNewBtn?.addEventListener("click", onStartModeNewGame);
   ui.startModeLoadBtn?.addEventListener("click", onStartModeLoadGame);
   ui.startCurrentGamesList?.addEventListener("click", onStartCurrentGamesListClick);
@@ -2390,19 +2746,10 @@ function bindUI() {
 }
 
 function preloadSheets() {
-  const entries = Object.entries(SHEET_PATHS);
-  const tasks = entries.map(([key, path]) => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        state.sprites[key] = img;
-        resolve();
-      };
-      img.onerror = () => reject(new Error(`missing ${path}`));
-      img.src = path;
-    });
+  return ensureDeckAssetsLoaded(CLASSIC_DECK_ID).then((classicSheets) => {
+    state.sprites = { ...classicSheets };
+    return classicSheets;
   });
-  return Promise.all(tasks);
 }
 
 function showStartMenu() {
@@ -2420,12 +2767,15 @@ function showStartMenu() {
   setFriendInterstitialOpen(false);
   setLogPanelOpen(false);
   setGameSummaryPanelOpen(false);
+  setDeckPanelOpen(false);
   setCodePanelOpen(false);
+  setStartDeckPanelOpen(false);
   setStartCurrentGamesPanelOpen(false);
   setCodeStatus("", false, "start");
   if (document.title !== "Koi-Koi") {
     document.title = "Koi-Koi";
   }
+  renderDeckUi();
   refreshStartMenuAsyncUx();
   refreshCurrentGamesPanel();
 }
@@ -2434,6 +2784,7 @@ function hideStartMenu() {
   if (ui.startMenu) {
     ui.startMenu.hidden = true;
   }
+  setStartDeckPanelOpen(false);
   setStartCurrentGamesPanelOpen(false);
   setStartOnlinePanelOpen(false);
   setStartManualLoadVisible(false);
@@ -2485,11 +2836,40 @@ function setGameSummaryPanelOpen(open) {
 
 function onToggleGameSummaryPanel() {
   const nextOpen = ui.gameSummaryPanel?.hidden !== false;
+  if (nextOpen) {
+    setDeckPanelOpen(false);
+  }
   setGameSummaryPanelOpen(nextOpen);
+}
+
+function setDeckPanelOpen(open) {
+  if (!ui.deckPanel) return;
+  ui.deckPanel.hidden = !open;
+  if (open) {
+    setGameSummaryPanelOpen(false);
+    setCodePanelOpen(false);
+  }
+  renderDeckUi();
+}
+
+function onToggleDeckPanel() {
+  const nextOpen = ui.deckPanel?.hidden !== false;
+  setDeckPanelOpen(nextOpen);
+}
+
+function onDeckPickerClick(event) {
+  const button = event.target.closest("[data-deck-id]");
+  if (!button) return;
+  const deckId = button.dataset.deckId;
+  if (!deckId) return;
+  void setSelectedDeck(deckId);
 }
 
 function onToggleCodePanel() {
   const nextOpen = ui.codePanel?.hidden !== false;
+  if (nextOpen) {
+    setDeckPanelOpen(false);
+  }
   setCodePanelOpen(nextOpen);
   if (nextOpen) {
     refreshExportCode();
@@ -4833,6 +5213,7 @@ function renderAll() {
   state.turnCheckpointReady = computeTurnCheckpointReady();
   renderDocumentTitleAndOnlineRoomChip();
   renderRtcStatusBadge();
+  renderDeckUi();
   if (!Array.isArray(state.players) || state.players.length < 2 || !state.players[0] || !state.players[1]) {
     state.autoFocusTargetKey = null;
     return;
@@ -5573,24 +5954,32 @@ function paintPreviewBack(ctx, width, height) {
   }
 }
 
-function paintPreviewFace(cardId, canvas) {
-  const card = CARD_BY_ID.get(cardId);
-  if (!card) return;
-  const sheet = state.sprites[card.sprite.sheet];
-  const ctx = canvas.getContext("2d");
-  if (!sheet || !ctx) return;
+function paintCardFaceSprite(ctx, canvas, sheet, sprite) {
+  if (!ctx || !canvas || !sheet || !sprite) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     sheet,
-    card.sprite.x,
-    card.sprite.y,
-    card.sprite.w,
-    card.sprite.h,
+    sprite.x,
+    sprite.y,
+    sprite.w,
+    sprite.h,
     0,
     0,
     canvas.width,
     canvas.height
   );
+}
+
+function paintPreviewFace(cardId, canvas) {
+  const card = CARD_BY_ID.get(cardId);
+  if (!card) return;
+  const sprite = resolveCardSprite(card.id);
+  if (!sprite) return;
+  const sheet = getLoadedDeckSheet(sprite.deckId, sprite.sheet);
+  const ctx = canvas.getContext("2d");
+  if (!sheet || !ctx) return;
+  paintCardFaceSprite(ctx, canvas, sheet, sprite);
 }
 
 function getChoicePromptText(pending) {
@@ -5938,20 +6327,10 @@ function paintAllCards() {
     const card = CARD_BY_ID.get(canvas.dataset.cardId);
     if (!card) continue;
     const ctx = canvas.getContext("2d");
-    const sheet = state.sprites[card.sprite.sheet];
+    const sprite = resolveCardSprite(card.id);
+    const sheet = sprite ? getLoadedDeckSheet(sprite.deckId, sprite.sheet) : null;
     if (!sheet || !ctx) continue;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(
-      sheet,
-      card.sprite.x,
-      card.sprite.y,
-      card.sprite.w,
-      card.sprite.h,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
+    paintCardFaceSprite(ctx, canvas, sheet, sprite);
   }
 }
 
@@ -5980,6 +6359,10 @@ function renderGameToText() {
     const startupPayload = {
       mode: "startup",
       play_mode: state.playMode,
+      deck: {
+        selected: getSelectedDeckId(),
+        available: Object.keys(DECK_DEFS),
+      },
       friend_flow: state.friendFlow,
       rtc: {
         role: state.rtcRole,
@@ -6017,6 +6400,10 @@ function renderGameToText() {
   const payload = {
     mode: state.matchOver ? "match-over" : state.roundOver ? "round-over" : state.awaitingDecision ? "decision" : "playing",
     play_mode: state.playMode,
+    deck: {
+      selected: getSelectedDeckId(),
+      available: Object.keys(DECK_DEFS),
+    },
     friend_flow: state.friendFlow,
     rtc: {
       role: state.rtcRole,
