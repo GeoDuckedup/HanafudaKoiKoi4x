@@ -134,6 +134,13 @@ const CARD_TYPE_BADGE_TEXT = {
   basic: "PLN",
 };
 
+const CAPTURE_SUMMARY_TYPES = Object.freeze([
+  { type: "light", label: "Bright" },
+  { type: "seed", label: "Seed" },
+  { type: "scroll", label: "Scroll" },
+  { type: "basic", label: "Plain" },
+]);
+
 const MONTH_CARD_DEFS = [
   {
     month: 1,
@@ -2801,6 +2808,7 @@ function cacheUI() {
   ui.drawPreview = document.getElementById("draw-preview");
   ui.playerZone = document.getElementById("player-zone");
   ui.fieldZone = document.getElementById("field-zone");
+  ui.capturedZone = document.getElementById("captured-zone");
   ui.handLockNote = document.getElementById("hand-lock-note");
   ui.cpuCaptured = document.getElementById("cpu-captured");
   ui.playerCaptured = document.getElementById("player-captured");
@@ -2876,6 +2884,7 @@ function cacheUI() {
 function bindUI() {
   ui.playerHand.addEventListener("click", onPlayerHandClick);
   ui.field.addEventListener("click", onFieldClick);
+  ui.capturedZone?.addEventListener("click", onCapturedZoneToggle);
   ui.drawPreview?.addEventListener("click", onDrawPreviewClick);
   ui.contextZone.addEventListener("click", onContextActionClick);
   ui.gameSummaryToggle?.addEventListener("click", onToggleGameSummaryPanel);
@@ -2925,6 +2934,14 @@ function bindUI() {
     ui.rulesPanel.hidden = !ui.rulesPanel.hidden;
     ui.rulesToggle.textContent = ui.rulesPanel.hidden ? "Rules" : "Hide Rules";
   });
+}
+
+function onCapturedZoneToggle() {
+  if (!state.ready || !Array.isArray(state.players) || state.players.length < 2) return;
+  if (ui.startMenu && !ui.startMenu.hidden) return;
+  if (ui.friendInterstitial && !ui.friendInterstitial.hidden) return;
+  toggleCaptureViewMode();
+  renderAll();
 }
 
 function preloadSheets() {
@@ -3560,6 +3577,52 @@ function getRecentCapturedIdSet(playerIndex) {
   return new Set(getHighlightedCapturedIds(playerIndex));
 }
 
+function getCaptureViewMode() {
+  return state.captureViewMode === "collapsed" ? "collapsed" : "expanded";
+}
+
+function setCaptureViewMode(mode) {
+  state.captureViewMode = mode === "collapsed" ? "collapsed" : "expanded";
+}
+
+function toggleCaptureViewMode() {
+  setCaptureViewMode(getCaptureViewMode() === "collapsed" ? "expanded" : "collapsed");
+}
+
+function buildCaptureSummaryEntries(captured, highlightedIds = new Set()) {
+  const entries = CAPTURE_SUMMARY_TYPES.map(({ type, label }) => ({
+    type,
+    label,
+    count: 0,
+    lastCardId: null,
+    highlighted: false,
+  }));
+  const byType = new Map(entries.map((entry) => [entry.type, entry]));
+  for (const card of Array.isArray(captured) ? captured : []) {
+    const entry = byType.get(card?.type);
+    if (!entry) continue;
+    entry.count += 1;
+    entry.lastCardId = card.id;
+    if (highlightedIds.has(card.id)) {
+      entry.highlighted = true;
+    }
+  }
+  return entries;
+}
+
+function buildCaptureSummaryPayload(captured, highlightedIds = new Set()) {
+  const summary = {};
+  for (const entry of buildCaptureSummaryEntries(captured, highlightedIds)) {
+    summary[entry.type] = {
+      label: entry.label,
+      count: entry.count,
+      top_card: entry.lastCardId,
+      highlighted: entry.highlighted,
+    };
+  }
+  return summary;
+}
+
 function encodeStateToCode() {
   return getSnapshotCodec().encodeStateToCode();
 }
@@ -3586,6 +3649,7 @@ function validateSnapshot(snapshot, options = {}) {
 
 function applySnapshot(snapshot, options = {}) {
   const result = getSnapshotCodec().applySnapshot(snapshot, options);
+  setCaptureViewMode("expanded");
   clearCapturedHighlights();
   return result;
 }
@@ -4044,6 +4108,7 @@ function startNewMatch(options = {}) {
     resetTurnReplayVisual: true,
     resetDrawPreviewFxState: true,
   });
+  setCaptureViewMode("expanded");
   state.playMode = playMode;
   state.friendFlow = friendFlow;
   const startingOnlineFriendSession = playMode === "friend" && Boolean(state.rtcRole && state.rtcRoomCode);
@@ -6427,20 +6492,45 @@ function renderCaptured() {
   const playerCaptured = getSortedCapturedForDisplay(state.players[bottomPlayerIndex].captured);
   const cpuRecentIds = getRecentCapturedIdSet(topPlayerIndex);
   const playerRecentIds = getRecentCapturedIdSet(bottomPlayerIndex);
+  const captureViewMode = getCaptureViewMode();
 
-  ui.cpuCaptured.innerHTML = cpuCaptured
-    .map(
-      (card) =>
-        `<div class="card mini badged${cpuRecentIds.has(card.id) ? " recent-capture" : ""}" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
-    )
-    .join("");
+  if (ui.capturedZone) {
+    const collapsed = captureViewMode === "collapsed";
+    ui.capturedZone.classList.toggle("is-collapsed", collapsed);
+    ui.capturedZone.dataset.captureView = captureViewMode;
+    ui.capturedZone.title = collapsed ? "Click to expand captures" : "Click to collapse captures";
+  }
 
-  ui.playerCaptured.innerHTML = playerCaptured
-    .map(
-      (card) =>
-        `<div class="card mini badged${playerRecentIds.has(card.id) ? " recent-capture" : ""}" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
-    )
-    .join("");
+  const renderExpandedGrid = (cards, highlightedIds) =>
+    cards
+      .map(
+        (card) =>
+          `<div class="card mini badged${highlightedIds.has(card.id) ? " recent-capture" : ""}" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
+      )
+      .join("");
+
+  const renderCollapsedGrid = (captured, highlightedIds) => {
+    const entries = buildCaptureSummaryEntries(captured, highlightedIds);
+    return `<div class="capture-summary-grid">${entries
+      .map((entry) => {
+        const lastCard = entry.lastCardId ? CARD_BY_ID.get(entry.lastCardId) : null;
+        const preview = lastCard
+          ? `<div class="card mini badged capture-summary-card${entry.highlighted ? " recent-capture" : ""}" data-card-type="${lastCard.type}">${renderBadgedCardContent(lastCard)}<span class="capture-summary-count">${entry.count}</span></div>`
+          : `<div class="card mini capture-summary-card empty${entry.highlighted ? " recent-capture" : ""}" data-card-type="${entry.type}"><span class="capture-summary-empty" aria-hidden="true">${getCardTypeBadgeText(entry.type)}</span><span class="capture-summary-count">${entry.count}</span></div>`;
+        return `<div class="capture-summary-tile${entry.highlighted ? " recent-capture" : ""}" data-card-type="${entry.type}"><div class="capture-summary-label">${entry.label}</div><div class="capture-summary-preview">${preview}</div></div>`;
+      })
+      .join("")}</div>`;
+  };
+
+  ui.cpuCaptured.innerHTML =
+    captureViewMode === "collapsed"
+      ? renderCollapsedGrid(state.players[topPlayerIndex].captured, cpuRecentIds)
+      : renderExpandedGrid(cpuCaptured, cpuRecentIds);
+
+  ui.playerCaptured.innerHTML =
+    captureViewMode === "collapsed"
+      ? renderCollapsedGrid(state.players[bottomPlayerIndex].captured, playerRecentIds)
+      : renderExpandedGrid(playerCaptured, playerRecentIds);
 }
 
 function setContextButton(button, { text, action, disabled, primary = false }) {
@@ -6645,6 +6735,7 @@ function renderGameToText() {
     const startupPayload = {
       mode: "startup",
       play_mode: state.playMode,
+      capture_view: getCaptureViewMode(),
       deck: {
         selected: getSelectedDeckId(),
         available: Object.keys(DECK_DEFS),
@@ -6737,6 +6828,7 @@ function renderGameToText() {
     special_two_x_player: state.roundSpecialTwoXPlayer === null ? null : state.players[state.roundSpecialTwoXPlayer].name,
     round12_leader_at_start:
       state.roundLeaderAtStart === null ? null : state.players[state.roundLeaderAtStart].name,
+    capture_view: getCaptureViewMode(),
     deck_count: state.drawPile.length,
     pending_selection:
       state.pendingSelection && state.pendingSelection.playerIndex === getDisplayBottomPlayerIndex()
@@ -6774,6 +6866,10 @@ function renderGameToText() {
       hand: bottomHandOut,
       captured_count: state.players[bottomPlayerIndex].captured.length,
       recent_captured: getHighlightedCapturedIds(bottomPlayerIndex),
+      capture_summary: buildCaptureSummaryPayload(
+        state.players[bottomPlayerIndex].captured,
+        getRecentCapturedIdSet(bottomPlayerIndex)
+      ),
       yaku_points: state.players[bottomPlayerIndex].yaku.points,
       yaku_names: state.players[bottomPlayerIndex].yaku.names,
     },
@@ -6782,6 +6878,10 @@ function renderGameToText() {
       hand_count: state.players[topPlayerIndex].hand.length,
       captured_count: state.players[topPlayerIndex].captured.length,
       recent_captured: getHighlightedCapturedIds(topPlayerIndex),
+      capture_summary: buildCaptureSummaryPayload(
+        state.players[topPlayerIndex].captured,
+        getRecentCapturedIdSet(topPlayerIndex)
+      ),
       yaku_points: state.players[topPlayerIndex].yaku.points,
       yaku_names: state.players[topPlayerIndex].yaku.names,
       profile: cpuProfile.name,
