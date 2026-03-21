@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Hanafuda Koi-Koi</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css?v=20260321a" />
   </head>
   <body>
     <main class="app">
@@ -80,6 +80,7 @@
           <button id="game-summary-toggle" class="ghost" type="button">Game 1 / 12</button>
           <button id="main-menu-btn" class="ghost" type="button">Main Menu</button>
           <button id="deck-toggle" class="ghost" type="button">Deck</button>
+          <button id="theme-toggle" class="ghost" type="button">Theme</button>
           <button id="log-toggle" class="ghost" type="button">Action Log</button>
           <button id="rules-toggle" class="ghost" type="button">Rules</button>
         </div>
@@ -89,6 +90,11 @@
         <div class="deck-panel-head">Choose Deck</div>
         <div id="deck-panel-status" class="code-status"></div>
         <div id="deck-panel-list" class="deck-picker-list"></div>
+      </section>
+
+      <section id="theme-panel" class="deck-panel" hidden>
+        <div class="deck-panel-head">Choose Theme</div>
+        <div id="theme-panel-list" class="theme-picker-list"></div>
       </section>
 
       <section id="game-summary-panel" class="summary-panel" hidden>
@@ -118,7 +124,7 @@
         <textarea id="import-code" class="code-text" placeholder="Paste a link or code here"></textarea>
         <div class="code-actions">
           <button id="load-code-btn" type="button">Load</button>
-          <button id="close-code-btn" type="button" class="ghost">Back to Menu</button>
+          <button id="close-code-btn" type="button" class="ghost">Close</button>
         </div>
         <div id="code-advanced" class="code-advanced" hidden>
           <label id="export-code-label" class="code-label" for="export-code">Current raw code</label>
@@ -267,6 +273,7 @@
           <button id="start-mode-cpu-btn" type="button">Play CPU</button>
           <button id="start-mode-online-btn" type="button">Play Online</button>
           <button id="start-deck-btn" type="button">Choose Deck: Classic</button>
+          <button id="start-theme-btn" type="button">Theme: Classic Warm</button>
         </div>
         <div id="start-deck-panel" class="current-games-panel deck-picker-panel" hidden>
           <div class="current-games-head">
@@ -274,6 +281,12 @@
           </div>
           <div id="start-deck-status" class="code-status"></div>
           <div id="start-deck-list" class="deck-picker-list"></div>
+        </div>
+        <div id="start-theme-panel" class="current-games-panel deck-picker-panel" hidden>
+          <div class="current-games-head">
+            <div class="current-games-title">Choose Theme</div>
+          </div>
+          <div id="start-theme-list" class="theme-picker-list"></div>
         </div>
         <div id="start-current-games-panel" class="current-games-panel" hidden>
           <div class="current-games-head">

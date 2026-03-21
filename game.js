@@ -1,6 +1,10 @@
 const CLASSIC_DECK_ID = "classic";
 const RETRO8BIT_DECK_ID = "retro8bit";
+const CLAY_DECK_ID = "clay";
 const SELECTED_DECK_STORAGE_KEY = "hkk_selected_deck";
+const CLASSIC_THEME_ID = "classicWarm";
+const PAPER_THEME_ID = "paperLight";
+const SELECTED_THEME_STORAGE_KEY = "hkk_selected_theme";
 
 const CLASSIC_SHEET_PATHS = {
   jan: "assets/decks/classic/january.png",
@@ -286,6 +290,36 @@ const RETRO8BIT_MONTH_LABELS = Object.freeze({
   dec: "December",
 });
 
+const CLAY_SHEET_PATHS = Object.freeze({
+  jan: "assets/decks/Clay/january.png",
+  feb: "assets/decks/Clay/February.png",
+  mar: "assets/decks/Clay/March.png",
+  apr: "assets/decks/Clay/April.png",
+  may: "assets/decks/Clay/May.png",
+  jun: "assets/decks/Clay/June.png",
+  jul: "assets/decks/Clay/July.png",
+  aug: "assets/decks/Clay/August.jpg",
+  sep: "assets/decks/Clay/September.png",
+  oct: "assets/decks/Clay/October.png",
+  nov: "assets/decks/Clay/November.png",
+  dec: "assets/decks/Clay/December.png",
+});
+
+const CLAY_MONTH_SHEETS = Object.freeze({
+  1: "jan",
+  2: "feb",
+  3: "mar",
+  4: "apr",
+  5: "may",
+  6: "jun",
+  7: "jul",
+  8: "aug",
+  9: "sep",
+  10: "oct",
+  11: "nov",
+  12: "dec",
+});
+
 function buildDeckOverrideSpritesByCardId(baseMonthSprites, overrideMonthSheets) {
   const spritesByCardId = {};
   for (const [monthValue, sheetId] of Object.entries(overrideMonthSheets)) {
@@ -303,6 +337,9 @@ function buildDeckOverrideSpritesByCardId(baseMonthSprites, overrideMonthSheets)
 const RETRO8BIT_SPRITES_BY_CARD_ID = Object.freeze(
   buildDeckOverrideSpritesByCardId(CLASSIC_MONTH_SPRITES, RETRO8BIT_MONTH_SHEETS)
 );
+const CLAY_SPRITES_BY_CARD_ID = Object.freeze(
+  buildDeckOverrideSpritesByCardId(CLASSIC_MONTH_SPRITES, CLAY_MONTH_SHEETS)
+);
 
 const CLASSIC_SPRITES_BY_CARD_ID = Object.freeze(buildSpritesByCardId(CLASSIC_MONTH_SPRITES));
 const DECK_DEFS = Object.freeze({
@@ -310,6 +347,7 @@ const DECK_DEFS = Object.freeze({
     id: CLASSIC_DECK_ID,
     label: "Classic",
     shortLabel: "Classic",
+    previewLabel: "Original 12-month art set",
     thumbPath: CLASSIC_SHEET_PATHS.jan,
     sheetPaths: Object.freeze({ ...CLASSIC_SHEET_PATHS }),
     spritesByCardId: CLASSIC_SPRITES_BY_CARD_ID,
@@ -318,9 +356,36 @@ const DECK_DEFS = Object.freeze({
     id: RETRO8BIT_DECK_ID,
     label: "Retro 8-Bit",
     shortLabel: "8-Bit",
+    previewLabel: `${Object.keys(RETRO8BIT_MONTH_SHEETS).length}-month classic-layout override set`,
     thumbPath: RETRO8BIT_SHEET_PATHS.jan,
     sheetPaths: Object.freeze({ ...RETRO8BIT_SHEET_PATHS }),
     spritesByCardId: RETRO8BIT_SPRITES_BY_CARD_ID,
+  }),
+  [CLAY_DECK_ID]: Object.freeze({
+    id: CLAY_DECK_ID,
+    label: "Clay",
+    shortLabel: "Clay",
+    previewLabel: `${Object.keys(CLAY_MONTH_SHEETS).length}-month classic-layout override set`,
+    thumbPath: CLAY_SHEET_PATHS.jan,
+    sheetPaths: Object.freeze({ ...CLAY_SHEET_PATHS }),
+    spritesByCardId: CLAY_SPRITES_BY_CARD_ID,
+  }),
+});
+
+const THEME_DEFS = Object.freeze({
+  [CLASSIC_THEME_ID]: Object.freeze({
+    id: CLASSIC_THEME_ID,
+    label: "Classic Warm",
+    shortLabel: "Warm",
+    previewLabel: "Warm tabletop shell with the original parchment UI.",
+    swatchClass: "theme-swatch-classicWarm",
+  }),
+  [PAPER_THEME_ID]: Object.freeze({
+    id: PAPER_THEME_ID,
+    label: "Paper Light",
+    shortLabel: "Paper",
+    previewLabel: "Off-paper white shell that makes the board and cards pop harder.",
+    swatchClass: "theme-swatch-paperLight",
   }),
 });
 
@@ -426,6 +491,8 @@ function init() {
   bindRtcBridge();
   bindFirebaseOnlineAuth();
   state.selectedDeckId = readPersistedSelectedDeckId();
+  state.selectedThemeId = readPersistedSelectedThemeId();
+  applySelectedTheme();
   primeDeckThumbCache();
   validateDeckDefinitions();
   preloadSheets()
@@ -439,6 +506,7 @@ function init() {
       }
       state.ready = true;
       renderDeckUi();
+      renderThemeUi();
       const reconnectResult = await attemptOnlineResumeOnLoad();
       if (!reconnectResult.resumed) {
         showStartMenu();
@@ -494,6 +562,23 @@ function getSelectedDeckDef() {
   return getDeckDef(getSelectedDeckId());
 }
 
+function getThemeDef(themeId) {
+  return THEME_DEFS[normalizeThemeId(themeId)] || THEME_DEFS[CLASSIC_THEME_ID];
+}
+
+function normalizeThemeId(themeId) {
+  const nextThemeId = String(themeId || "").trim();
+  return THEME_DEFS[nextThemeId] ? nextThemeId : CLASSIC_THEME_ID;
+}
+
+function getSelectedThemeId() {
+  return normalizeThemeId(state.selectedThemeId);
+}
+
+function getSelectedThemeDef() {
+  return getThemeDef(getSelectedThemeId());
+}
+
 function readPersistedSelectedDeckId() {
   try {
     return normalizeDeckId(window.localStorage?.getItem(SELECTED_DECK_STORAGE_KEY) || CLASSIC_DECK_ID);
@@ -509,6 +594,27 @@ function persistSelectedDeckId(deckId) {
   } catch (_err) {
     // Ignore storage failures; deck choice is cosmetic only.
   }
+}
+
+function readPersistedSelectedThemeId() {
+  try {
+    return normalizeThemeId(window.localStorage?.getItem(SELECTED_THEME_STORAGE_KEY) || CLASSIC_THEME_ID);
+  } catch (_err) {
+    return CLASSIC_THEME_ID;
+  }
+}
+
+function persistSelectedThemeId(themeId) {
+  const safeThemeId = normalizeThemeId(themeId);
+  try {
+    window.localStorage?.setItem(SELECTED_THEME_STORAGE_KEY, safeThemeId);
+  } catch (_err) {
+    // Ignore storage failures; theme choice is cosmetic only.
+  }
+}
+
+function applySelectedTheme() {
+  document.body?.setAttribute("data-ui-theme", getSelectedThemeId());
 }
 
 function primeDeckThumbCache() {
@@ -527,6 +633,7 @@ async function ensureDeckAssetsLoaded(deckId) {
   const safeDeckId = normalizeDeckId(deckId);
   const deckDef = getDeckDef(safeDeckId);
   state.deckSheets[safeDeckId] ??= {};
+  state.deckOverrideDebugLoggedById ??= {};
   const sheetCache = state.deckSheets[safeDeckId];
   const tasks = Object.entries(deckDef.sheetPaths).map(([sheetId, assetPath]) => {
     if (sheetCache[sheetId]) {
@@ -543,19 +650,17 @@ async function ensureDeckAssetsLoaded(deckId) {
     });
   });
   await Promise.all(tasks);
-  if (safeDeckId === RETRO8BIT_DECK_ID && !state.deckOverrideDebugLogged) {
+  if (safeDeckId !== CLASSIC_DECK_ID && !state.deckOverrideDebugLoggedById[safeDeckId]) {
     let loggedSheet = false;
-    for (const [monthValue, sheetId] of Object.entries(RETRO8BIT_MONTH_SHEETS)) {
-      const loadedSheet = sheetCache[sheetId];
+    for (const [sheetId, loadedSheet] of Object.entries(sheetCache)) {
       if (!loadedSheet) continue;
-      const monthNumber = Number(monthValue);
-      const mappings = {
-        [`${monthNumber}a`]: RETRO8BIT_SPRITES_BY_CARD_ID[`${monthNumber}a`],
-        [`${monthNumber}b`]: RETRO8BIT_SPRITES_BY_CARD_ID[`${monthNumber}b`],
-        [`${monthNumber}c`]: RETRO8BIT_SPRITES_BY_CARD_ID[`${monthNumber}c`],
-        [`${monthNumber}d`]: RETRO8BIT_SPRITES_BY_CARD_ID[`${monthNumber}d`],
-      };
-      console.info(`[deck] Retro ${RETRO8BIT_MONTH_LABELS[sheetId] || sheetId} sheet loaded`, {
+      const mappings = Object.fromEntries(
+        Object.entries(deckDef.spritesByCardId)
+          .filter(([, sprite]) => sprite.sheet === sheetId)
+          .sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
+      );
+      if (!Object.keys(mappings).length) continue;
+      console.info(`[deck] ${deckDef.label} ${RETRO8BIT_MONTH_LABELS[sheetId] || sheetId} sheet loaded`, {
         width: loadedSheet.naturalWidth,
         height: loadedSheet.naturalHeight,
         cropSource: "classic-layout override",
@@ -564,7 +669,7 @@ async function ensureDeckAssetsLoaded(deckId) {
       loggedSheet = true;
     }
     if (loggedSheet) {
-      state.deckOverrideDebugLogged = true;
+      state.deckOverrideDebugLoggedById[safeDeckId] = true;
     }
   }
   return sheetCache;
@@ -643,16 +748,12 @@ function getDeckPickerMarkup() {
   return Object.values(DECK_DEFS)
     .map((deckDef) => {
       const isSelected = deckDef.id === selectedDeckId;
-      const previewLabel =
-        deckDef.id === RETRO8BIT_DECK_ID
-          ? `${Object.keys(RETRO8BIT_MONTH_SHEETS).length}-month classic-layout override set`
-          : "Original 12-month art set";
       return `
         <button type="button" class="deck-picker-row${isSelected ? " is-selected" : ""}" data-deck-id="${deckDef.id}">
           <img class="deck-picker-thumb" src="${state.deckThumbs[deckDef.id] || deckDef.thumbPath}" alt="${deckDef.label} preview" loading="lazy" />
           <span class="deck-picker-copy">
             <span class="deck-picker-title">${deckDef.label}</span>
-            <span class="deck-picker-subtitle">${previewLabel}</span>
+            <span class="deck-picker-subtitle">${deckDef.previewLabel || ""}</span>
           </span>
           <span class="deck-picker-check">${isSelected ? "SELECTED" : ""}</span>
         </button>
@@ -684,6 +785,53 @@ function renderDeckUi() {
     node.classList.toggle("error", Boolean(state.deckStatusMessage && state.deckStatusError));
     node.classList.toggle("success", Boolean(state.deckStatusMessage && !state.deckStatusError));
   }
+}
+
+function getThemePickerMarkup() {
+  const selectedThemeId = getSelectedThemeId();
+  return Object.values(THEME_DEFS)
+    .map((themeDef) => {
+      const isSelected = themeDef.id === selectedThemeId;
+      return `
+        <button type="button" class="theme-picker-row${isSelected ? " is-selected" : ""}" data-theme-id="${themeDef.id}">
+          <span class="theme-swatch ${themeDef.swatchClass}" aria-hidden="true"></span>
+          <span class="deck-picker-copy">
+            <span class="deck-picker-title">${themeDef.label}</span>
+            <span class="deck-picker-subtitle">${themeDef.previewLabel}</span>
+          </span>
+          <span class="deck-picker-check">${isSelected ? "SELECTED" : ""}</span>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function renderThemeUi() {
+  const selectedTheme = getSelectedThemeDef();
+  applySelectedTheme();
+  if (ui.startThemeBtn) {
+    ui.startThemeBtn.textContent = `Theme: ${selectedTheme.label}`;
+    ui.startThemeBtn.classList.toggle("primary", Boolean(ui.startThemePanel && !ui.startThemePanel.hidden));
+  }
+  if (ui.themeToggle) {
+    ui.themeToggle.textContent = `Theme: ${selectedTheme.shortLabel || selectedTheme.label}`;
+    ui.themeToggle.classList.toggle("primary", Boolean(ui.themePanel && !ui.themePanel.hidden));
+  }
+  const markup = getThemePickerMarkup();
+  if (ui.startThemeList) {
+    ui.startThemeList.innerHTML = markup;
+  }
+  if (ui.themePanelList) {
+    ui.themePanelList.innerHTML = markup;
+  }
+}
+
+function setSelectedTheme(themeId) {
+  const safeThemeId = normalizeThemeId(themeId);
+  state.selectedThemeId = safeThemeId;
+  persistSelectedThemeId(safeThemeId);
+  applySelectedTheme();
+  renderAll();
 }
 
 function getRtcBridge() {
@@ -1974,6 +2122,7 @@ function setStartCurrentGamesPanelOpen(open, mode = null) {
     return;
   }
   setStartDeckPanelOpen(false);
+  setStartThemePanelOpen(false);
   setStartOnlinePanelOpen(false);
   setStartManualLoadVisible(false);
   if (ui.startCurrentGamesList) ui.startCurrentGamesList.textContent = "";
@@ -1995,6 +2144,7 @@ function setStartDeckPanelOpen(open) {
       ui.startModeActions.appendChild(ui.startDeckPanel);
     }
     setStartCurrentGamesPanelOpen(false);
+    setStartThemePanelOpen(false);
     setStartOnlinePanelOpen(false);
     setStartManualLoadVisible(false);
   }
@@ -2004,6 +2154,29 @@ function setStartDeckPanelOpen(open) {
 function onStartDeckToggleFromMenu() {
   const nextOpen = ui.startDeckPanel?.hidden !== false;
   setStartDeckPanelOpen(nextOpen);
+}
+
+function setStartThemePanelOpen(open) {
+  if (!ui.startThemePanel) return;
+  const shouldOpen = Boolean(open);
+  ui.startThemePanel.hidden = !shouldOpen;
+  if (shouldOpen) {
+    if (ui.startThemeBtn) {
+      ui.startThemeBtn.insertAdjacentElement("afterend", ui.startThemePanel);
+    } else if (ui.startModeActions) {
+      ui.startModeActions.appendChild(ui.startThemePanel);
+    }
+    setStartCurrentGamesPanelOpen(false);
+    setStartDeckPanelOpen(false);
+    setStartOnlinePanelOpen(false);
+    setStartManualLoadVisible(false);
+  }
+  renderThemeUi();
+}
+
+function onStartThemeToggleFromMenu() {
+  const nextOpen = ui.startThemePanel?.hidden !== false;
+  setStartThemePanelOpen(nextOpen);
 }
 
 function onStartModeNewGame() {
@@ -2595,9 +2768,12 @@ function cacheUI() {
   ui.gameSummaryToggle = document.getElementById("game-summary-toggle");
   ui.mainMenuBtn = document.getElementById("main-menu-btn");
   ui.deckToggle = document.getElementById("deck-toggle");
+  ui.themeToggle = document.getElementById("theme-toggle");
   ui.deckPanel = document.getElementById("deck-panel");
   ui.deckPanelStatus = document.getElementById("deck-panel-status");
   ui.deckPanelList = document.getElementById("deck-panel-list");
+  ui.themePanel = document.getElementById("theme-panel");
+  ui.themePanelList = document.getElementById("theme-panel-list");
   ui.gameSummaryPanel = document.getElementById("game-summary-panel");
   ui.roundSummaryBody = document.getElementById("round-summary-body");
   ui.deckCount = document.getElementById("deck-count");
@@ -2652,9 +2828,12 @@ function cacheUI() {
   ui.startModeFriendBtn = document.getElementById("start-mode-friend-btn");
   ui.startModeOnlineBtn = document.getElementById("start-mode-online-btn");
   ui.startDeckBtn = document.getElementById("start-deck-btn");
+  ui.startThemeBtn = document.getElementById("start-theme-btn");
   ui.startDeckPanel = document.getElementById("start-deck-panel");
   ui.startDeckStatus = document.getElementById("start-deck-status");
   ui.startDeckList = document.getElementById("start-deck-list");
+  ui.startThemePanel = document.getElementById("start-theme-panel");
+  ui.startThemeList = document.getElementById("start-theme-list");
   ui.startCurrentGamesPanel = document.getElementById("start-current-games-panel");
   ui.startCurrentGamesTitle = document.getElementById("start-current-games-title");
   ui.startModeNewBtn = document.getElementById("start-mode-new-btn");
@@ -2702,7 +2881,9 @@ function bindUI() {
   ui.gameSummaryToggle?.addEventListener("click", onToggleGameSummaryPanel);
   ui.mainMenuBtn?.addEventListener("click", onMainMenuFromHeader);
   ui.deckToggle?.addEventListener("click", onToggleDeckPanel);
+  ui.themeToggle?.addEventListener("click", onToggleThemePanel);
   ui.deckPanelList?.addEventListener("click", onDeckPickerClick);
+  ui.themePanelList?.addEventListener("click", onThemePickerClick);
   ui.onlineRoomUrlBtn?.addEventListener("click", onOnlineRoomUrlCopy);
   ui.logToggle?.addEventListener("click", onToggleLogPanel);
   ui.codeToggle?.addEventListener("click", onToggleCodePanel);
@@ -2713,13 +2894,14 @@ function bindUI() {
   ui.loadCodeBtn?.addEventListener("click", onLoadCodeFromPanel);
   ui.closeCodeBtn?.addEventListener("click", () => {
     setCodePanelOpen(false);
-    showStartMenu();
   });
   ui.startModeCpuBtn?.addEventListener("click", onStartModeCpuFromMenu);
   ui.startModeFriendBtn?.addEventListener("click", onStartModeFriendFromMenu);
   ui.startModeOnlineBtn?.addEventListener("click", onStartModeOnlineFromMenu);
   ui.startDeckBtn?.addEventListener("click", onStartDeckToggleFromMenu);
+  ui.startThemeBtn?.addEventListener("click", onStartThemeToggleFromMenu);
   ui.startDeckList?.addEventListener("click", onDeckPickerClick);
+  ui.startThemeList?.addEventListener("click", onThemePickerClick);
   ui.startModeNewBtn?.addEventListener("click", onStartModeNewGame);
   ui.startModeLoadBtn?.addEventListener("click", onStartModeLoadGame);
   ui.startCurrentGamesList?.addEventListener("click", onStartCurrentGamesListClick);
@@ -2768,14 +2950,17 @@ function showStartMenu() {
   setLogPanelOpen(false);
   setGameSummaryPanelOpen(false);
   setDeckPanelOpen(false);
+  setThemePanelOpen(false);
   setCodePanelOpen(false);
   setStartDeckPanelOpen(false);
+  setStartThemePanelOpen(false);
   setStartCurrentGamesPanelOpen(false);
   setCodeStatus("", false, "start");
   if (document.title !== "Koi-Koi") {
     document.title = "Koi-Koi";
   }
   renderDeckUi();
+  renderThemeUi();
   refreshStartMenuAsyncUx();
   refreshCurrentGamesPanel();
 }
@@ -2785,6 +2970,7 @@ function hideStartMenu() {
     ui.startMenu.hidden = true;
   }
   setStartDeckPanelOpen(false);
+  setStartThemePanelOpen(false);
   setStartCurrentGamesPanelOpen(false);
   setStartOnlinePanelOpen(false);
   setStartManualLoadVisible(false);
@@ -2838,6 +3024,7 @@ function onToggleGameSummaryPanel() {
   const nextOpen = ui.gameSummaryPanel?.hidden !== false;
   if (nextOpen) {
     setDeckPanelOpen(false);
+    setThemePanelOpen(false);
   }
   setGameSummaryPanelOpen(nextOpen);
 }
@@ -2847,6 +3034,7 @@ function setDeckPanelOpen(open) {
   ui.deckPanel.hidden = !open;
   if (open) {
     setGameSummaryPanelOpen(false);
+    setThemePanelOpen(false);
     setCodePanelOpen(false);
   }
   renderDeckUi();
@@ -2865,10 +3053,35 @@ function onDeckPickerClick(event) {
   void setSelectedDeck(deckId);
 }
 
+function setThemePanelOpen(open) {
+  if (!ui.themePanel) return;
+  ui.themePanel.hidden = !open;
+  if (open) {
+    setDeckPanelOpen(false);
+    setGameSummaryPanelOpen(false);
+    setCodePanelOpen(false);
+  }
+  renderThemeUi();
+}
+
+function onToggleThemePanel() {
+  const nextOpen = ui.themePanel?.hidden !== false;
+  setThemePanelOpen(nextOpen);
+}
+
+function onThemePickerClick(event) {
+  const button = event.target.closest("[data-theme-id]");
+  if (!button) return;
+  const themeId = button.dataset.themeId;
+  if (!themeId) return;
+  setSelectedTheme(themeId);
+}
+
 function onToggleCodePanel() {
   const nextOpen = ui.codePanel?.hidden !== false;
   if (nextOpen) {
     setDeckPanelOpen(false);
+    setThemePanelOpen(false);
   }
   setCodePanelOpen(nextOpen);
   if (nextOpen) {
@@ -3286,6 +3499,67 @@ function createPlayer(name, isHuman, roleLabel = name) {
   };
 }
 
+function createEmptyCapturedIdsByPlayer() {
+  return [[], []];
+}
+
+function normalizeCapturedIdsByPlayer(source) {
+  const safeSource = Array.isArray(source) && source.length === 2 ? source : createEmptyCapturedIdsByPlayer();
+  return [0, 1].map((playerIndex) =>
+    Array.isArray(safeSource[playerIndex]) ? safeSource[playerIndex].filter((cardId) => typeof cardId === "string") : []
+  );
+}
+
+function normalizeRecentCapturedIdsByPlayer() {
+  return normalizeCapturedIdsByPlayer(state.recentCapturedIdsByPlayer);
+}
+
+function normalizeTurnCapturedIdsByPlayer() {
+  return normalizeCapturedIdsByPlayer(state.turnCapturedIdsByPlayer);
+}
+
+function clearRecentCapturedHighlights() {
+  state.recentCapturedIdsByPlayer = createEmptyCapturedIdsByPlayer();
+}
+
+function clearTurnCapturedHighlights() {
+  state.turnCapturedIdsByPlayer = createEmptyCapturedIdsByPlayer();
+}
+
+function clearCapturedHighlights() {
+  clearRecentCapturedHighlights();
+  clearTurnCapturedHighlights();
+}
+
+function addTurnCapturedHighlights(playerIndex, cards) {
+  const next = normalizeTurnCapturedIdsByPlayer();
+  const addedIds = Array.isArray(cards) ? cards.map((card) => card?.id).filter(Boolean) : [];
+  next[playerIndex] = [...new Set([...next[playerIndex], ...addedIds])];
+  state.turnCapturedIdsByPlayer = next;
+}
+
+function commitTurnCapturedHighlights(playerIndex) {
+  const nextRecent = normalizeRecentCapturedIdsByPlayer();
+  const nextTurn = normalizeTurnCapturedIdsByPlayer();
+  nextRecent[playerIndex] = [...nextTurn[playerIndex]];
+  nextTurn[playerIndex] = [];
+  state.recentCapturedIdsByPlayer = nextRecent;
+  state.turnCapturedIdsByPlayer = nextTurn;
+}
+
+function getHighlightedCapturedIds(playerIndex) {
+  const turnGroups = normalizeTurnCapturedIdsByPlayer();
+  if (turnGroups[playerIndex]?.length) {
+    return turnGroups[playerIndex];
+  }
+  const recentGroups = normalizeRecentCapturedIdsByPlayer();
+  return recentGroups[playerIndex] || [];
+}
+
+function getRecentCapturedIdSet(playerIndex) {
+  return new Set(getHighlightedCapturedIds(playerIndex));
+}
+
 function encodeStateToCode() {
   return getSnapshotCodec().encodeStateToCode();
 }
@@ -3311,7 +3585,9 @@ function validateSnapshot(snapshot, options = {}) {
 }
 
 function applySnapshot(snapshot, options = {}) {
-  return getSnapshotCodec().applySnapshot(snapshot, options);
+  const result = getSnapshotCodec().applySnapshot(snapshot, options);
+  clearCapturedHighlights();
+  return result;
 }
 
 function hydratePendingSelection(pending) {
@@ -3873,6 +4149,7 @@ function startRound() {
   state.players[1].hand = sortByMonth(hands.cpu);
   state.players[0].captured = [];
   state.players[1].captured = [];
+  clearCapturedHighlights();
   state.players[0].yaku = { points: 0, names: [], triggerKeys: [] };
   state.players[1].yaku = { points: 0, names: [], triggerKeys: [] };
   state.players[0].yakuSeen = new Set();
@@ -4469,6 +4746,7 @@ function addCapturedCards(playerIndex, cards) {
   for (const card of cards) {
     player.captured.push(card);
   }
+  addTurnCapturedHighlights(playerIndex, cards);
 }
 
 function takeAllMonthMatchesFromField(month) {
@@ -4611,6 +4889,7 @@ function finalizeTurn(playerIndex, moveNumber) {
   }
 
   if (state.players[0].hand.length === 0 && state.players[1].hand.length === 0) {
+    commitTurnCapturedHighlights(playerIndex);
     resolveDeckExhaustion();
     return;
   }
@@ -4645,6 +4924,7 @@ function handleNewYakuEvent(
       if (state.roundOver || state.currentPlayer !== playerIndex) return;
       const action = chooseAIDecision(decision);
       if (action === "pass" && decision.canPass) {
+        commitTurnCapturedHighlights(playerIndex);
         logPlayerMove(
           playerIndex,
           decision.moveNumber,
@@ -4769,6 +5049,7 @@ function applyKoiAndContinue(decision) {
   }
 
   if (state.players[0].hand.length === 0 && state.players[1].hand.length === 0) {
+    commitTurnCapturedHighlights(decision.playerIndex);
     resolveDeckExhaustion();
     return;
   }
@@ -4779,6 +5060,7 @@ function applyKoiAndContinue(decision) {
 function moveToNextPlayer() {
   const previousPlayerIndex = state.currentPlayer;
   const previousTurnNumber = state.moveCounts[previousPlayerIndex];
+  commitTurnCapturedHighlights(previousPlayerIndex);
   commitTurnRecapForHandoff(previousPlayerIndex, previousTurnNumber);
   state.currentPlayer = state.currentPlayer === 0 ? 1 : 0;
   state.message = `${state.players[state.currentPlayer].name} to play. Table ${state.tableMultiplier}x.`;
@@ -5214,6 +5496,7 @@ function renderAll() {
   renderDocumentTitleAndOnlineRoomChip();
   renderRtcStatusBadge();
   renderDeckUi();
+  renderThemeUi();
   if (!Array.isArray(state.players) || state.players.length < 2 || !state.players[0] || !state.players[1]) {
     state.autoFocusTargetKey = null;
     return;
@@ -6142,18 +6425,20 @@ function renderCaptured() {
   const bottomPlayerIndex = getDisplayBottomPlayerIndex();
   const cpuCaptured = getSortedCapturedForDisplay(state.players[topPlayerIndex].captured);
   const playerCaptured = getSortedCapturedForDisplay(state.players[bottomPlayerIndex].captured);
+  const cpuRecentIds = getRecentCapturedIdSet(topPlayerIndex);
+  const playerRecentIds = getRecentCapturedIdSet(bottomPlayerIndex);
 
   ui.cpuCaptured.innerHTML = cpuCaptured
     .map(
       (card) =>
-        `<div class="card mini badged" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
+        `<div class="card mini badged${cpuRecentIds.has(card.id) ? " recent-capture" : ""}" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
     )
     .join("");
 
   ui.playerCaptured.innerHTML = playerCaptured
     .map(
       (card) =>
-        `<div class="card mini badged" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
+        `<div class="card mini badged${playerRecentIds.has(card.id) ? " recent-capture" : ""}" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
     )
     .join("");
 }
@@ -6307,6 +6592,7 @@ function onContextActionClick(event) {
     if (!decision.canPass) return;
     state.awaitingDecision = null;
     recordTurnRecapDecision("pass", state.tableMultiplier, decision.passMultiplier);
+    commitTurnCapturedHighlights(decision.playerIndex);
     logPlayerMove(
       decision.playerIndex,
       decision.moveNumber,
@@ -6363,6 +6649,10 @@ function renderGameToText() {
         selected: getSelectedDeckId(),
         available: Object.keys(DECK_DEFS),
       },
+      theme: {
+        selected: getSelectedThemeId(),
+        available: Object.keys(THEME_DEFS),
+      },
       friend_flow: state.friendFlow,
       rtc: {
         role: state.rtcRole,
@@ -6403,6 +6693,10 @@ function renderGameToText() {
     deck: {
       selected: getSelectedDeckId(),
       available: Object.keys(DECK_DEFS),
+    },
+    theme: {
+      selected: getSelectedThemeId(),
+      available: Object.keys(THEME_DEFS),
     },
     friend_flow: state.friendFlow,
     rtc: {
@@ -6479,6 +6773,7 @@ function renderGameToText() {
       score: state.players[bottomPlayerIndex].score,
       hand: bottomHandOut,
       captured_count: state.players[bottomPlayerIndex].captured.length,
+      recent_captured: getHighlightedCapturedIds(bottomPlayerIndex),
       yaku_points: state.players[bottomPlayerIndex].yaku.points,
       yaku_names: state.players[bottomPlayerIndex].yaku.names,
     },
@@ -6486,6 +6781,7 @@ function renderGameToText() {
       score: state.players[topPlayerIndex].score,
       hand_count: state.players[topPlayerIndex].hand.length,
       captured_count: state.players[topPlayerIndex].captured.length,
+      recent_captured: getHighlightedCapturedIds(topPlayerIndex),
       yaku_points: state.players[topPlayerIndex].yaku.points,
       yaku_names: state.players[topPlayerIndex].yaku.names,
       profile: cpuProfile.name,
