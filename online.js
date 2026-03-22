@@ -578,6 +578,97 @@
       );
     }
 
+    function getMatchRestartLeaderIndex() {
+      if (!Array.isArray(state.players) || state.players.length < 2) return 0;
+      const p0 = Number(state.players[0]?.score) || 0;
+      const p1 = Number(state.players[1]?.score) || 0;
+      if (p0 > p1) return 0;
+      if (p1 > p0) return 1;
+      if (state.previousRoundWinner === 0 || state.previousRoundWinner === 1) return state.previousRoundWinner;
+      if (state.dealer === 0 || state.dealer === 1) return state.dealer;
+      return 0;
+    }
+
+    async function syncOnlineMatchRestartSnapshot() {
+      if (!isOnlineFriendSessionActive()) return true;
+      if (state.rtcStatus !== "connected") return false;
+      let code = "";
+      try {
+        code = encodeStateForOnline();
+      } catch (err) {
+        console.warn("match-restart snapshot encode failed", err);
+        return false;
+      }
+      return sendRtcSignalWithSnapshot(
+        {
+          type: "turn-code",
+          reason: "match-restart",
+          gameNumber: state.gameNumber,
+          code,
+        },
+        {
+          snapshotCode: code,
+          context: "match-restart-sync",
+          onSnapshotWriteFailed: () => {
+            setFriendInterstitialStatus("New match started, but save failed. Opponent may need to reconnect.", true);
+          },
+          onSendFailed: () => {
+            setFriendInterstitialStatus("New match started, but sync failed. Opponent may need to reconnect.", true);
+          },
+        }
+      );
+    }
+
+    function setMatchRestartWaitingMessage() {
+      const waitingFor = [];
+      if (!state.matchRestartReadyByPlayer?.[0]) waitingFor.push(state.players[0]?.name || "Player 1");
+      if (!state.matchRestartReadyByPlayer?.[1]) waitingFor.push(state.players[1]?.name || "Player 2");
+      state.message = waitingFor.length
+        ? `Ready for a new match. Waiting for ${waitingFor.join(" + ")}.`
+        : "Ready for a new match.";
+    }
+
+    async function startAuthoritativeOnlineMatchRestart(reason = "match-restart") {
+      const leaderIndex = getMatchRestartLeaderIndex();
+      startNewMatch({
+        playMode: "friend",
+        friendFlow: "hybrid",
+        maxGames: state.maxGames,
+        forceDealerPlayerIndex: leaderIndex,
+        forceCurrentPlayerIndex: leaderIndex,
+      });
+      addSystemLog(`New online match started. ${state.players[leaderIndex]?.name || "Winner"} goes first.`);
+      const synced = await syncOnlineMatchRestartSnapshot();
+      if (!synced) {
+        addSystemLog("New match sync failed online. Opponent may need to reconnect.");
+        renderAll();
+      }
+      return synced;
+    }
+
+    async function markOnlineMatchRestartReady() {
+      if (!isOnlineFriendSessionActive() || !state.matchOver) return false;
+      const localPlayerIndex = getOnlineLocalPlayerIndex();
+      if (localPlayerIndex !== 0 && localPlayerIndex !== 1) return false;
+      if (state.matchRestartReadyByPlayer?.[localPlayerIndex]) {
+        renderAll();
+        return true;
+      }
+      state.matchRestartReadyByPlayer[localPlayerIndex] = true;
+      sendRtcSignal({
+        type: "match-restart-ready",
+        playerIndex: localPlayerIndex,
+        gameNumber: state.gameNumber,
+      });
+      if (state.rtcRole === "host" && state.matchRestartReadyByPlayer[0] && state.matchRestartReadyByPlayer[1]) {
+        await startAuthoritativeOnlineMatchRestart("host-local-ready");
+        return true;
+      }
+      setMatchRestartWaitingMessage();
+      renderAll();
+      return true;
+    }
+
     function beginOnlineFriendMatch() {
       if (!state.rtcPendingStart) return;
       const turnOwnerBeforeConnect = describeTurnOwnerForDebug(state.currentPlayer);
@@ -856,6 +947,23 @@
           return;
         }
         renderAll();
+        return;
+      }
+      if (type === "match-restart-ready") {
+        const playerIndex = asNullablePlayerIndex(signal.playerIndex, "rtc.match-restart-ready.playerIndex");
+        const gameNumber =
+          signal.gameNumber === undefined ? null : asInt(signal.gameNumber, "rtc.match-restart-ready.gameNumber");
+        if (!state.matchOver) return;
+        if (gameNumber !== null && gameNumber !== state.gameNumber) return;
+        if (playerIndex === 0 || playerIndex === 1) {
+          state.matchRestartReadyByPlayer[playerIndex] = true;
+        }
+        if (state.rtcRole === "host" && state.matchRestartReadyByPlayer[0] && state.matchRestartReadyByPlayer[1]) {
+          void startAuthoritativeOnlineMatchRestart("host-remote-ready");
+          return;
+        }
+        setMatchRestartWaitingMessage();
+        renderAll();
       }
     }
 
@@ -920,6 +1028,7 @@
       sendOnlineTurnCodeWithSnapshot,
       syncOnlineRoundTransitionSnapshot,
       syncOnlineMatchOverSnapshot,
+      markOnlineMatchRestartReady,
       beginOnlineFriendMatch,
       handleOnlineReconnect,
       handleRtcDisconnectAutoReconnect,

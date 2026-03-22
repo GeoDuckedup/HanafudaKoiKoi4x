@@ -1226,6 +1226,10 @@ function getOnlineLocalPlayerIndex() {
   return getOnlineSessionController().getOnlineLocalPlayerIndex();
 }
 
+function markOnlineMatchRestartReady() {
+  return getOnlineSessionController().markOnlineMatchRestartReady();
+}
+
 function getOnlineRemoteRole() {
   return getOnlineSessionController().getOnlineRemoteRole();
 }
@@ -4218,6 +4222,7 @@ function startNewMatch(options = {}) {
   state.actionLog = [];
   state.moveCounts = [0, 0];
   state.matchOver = false;
+  state.matchRestartReadyByPlayer = [false, false];
   state.rtcWaiting = false;
   state.rtcPendingStart = false;
   if (playMode !== "friend") {
@@ -5332,6 +5337,36 @@ async function markRoundTransitionReady(playerIndex = null) {
   state.message = `${readyName} is ready. Waiting for ${waitingFor.join(" + ")}.`;
   addSystemLog(state.message);
   renderAll();
+}
+
+function getMatchRestartLeaderIndex() {
+  if (!Array.isArray(state.players) || state.players.length < 2) return 0;
+  const p0 = Number(state.players[0]?.score) || 0;
+  const p1 = Number(state.players[1]?.score) || 0;
+  if (p0 > p1) return 0;
+  if (p1 > p0) return 1;
+  if (state.previousRoundWinner === 0 || state.previousRoundWinner === 1) return state.previousRoundWinner;
+  if (state.dealer === 0 || state.dealer === 1) return state.dealer;
+  return 0;
+}
+
+async function markMatchRestartReady() {
+  if (!state.matchOver) return;
+  if (!isFriendMode()) {
+    startNewMatch();
+    return;
+  }
+  if (!isOnlineFriendSessionActive()) {
+    startNewMatch({
+      playMode: "friend",
+      friendFlow: state.friendFlow,
+      maxGames: state.maxGames,
+      forceDealerPlayerIndex: getMatchRestartLeaderIndex(),
+      forceCurrentPlayerIndex: getMatchRestartLeaderIndex(),
+    });
+    return;
+  }
+  await markOnlineMatchRestartReady();
 }
 
 function endRoundDraw() {
@@ -6884,6 +6919,20 @@ function renderContextBar() {
     ui.contextZone.classList.add("single-action");
     ui.contextLeftBtn.hidden = true;
     ui.contextRightBtn.classList.add("full");
+    if (isOnlineFriendSessionActive()) {
+      const onlineLocalPlayerIndex = getOnlineLocalPlayerIndex();
+      const localReady =
+        onlineLocalPlayerIndex === 0 || onlineLocalPlayerIndex === 1
+          ? Boolean(state.matchRestartReadyByPlayer?.[onlineLocalPlayerIndex])
+          : false;
+      setContextButton(ui.contextRightBtn, {
+        text: localReady ? "Waiting For Opponent..." : "New Match",
+        action: "new-match",
+        disabled: localReady,
+        primary: !localReady,
+      });
+      return;
+    }
     setContextButton(ui.contextRightBtn, {
       text: "New Match",
       action: "new-match",
@@ -6981,7 +7030,7 @@ function onContextActionClick(event) {
   }
 
   if (action === "new-match") {
-    startNewMatch();
+    void markMatchRestartReady();
     return;
   }
 
@@ -7063,6 +7112,9 @@ function renderGameToText() {
         room_code: state.rtcRoomCode,
         waiting: state.rtcWaiting,
         pending_start: state.rtcPendingStart,
+        match_restart_ready: Array.isArray(state.matchRestartReadyByPlayer)
+          ? [...state.matchRestartReadyByPlayer]
+          : [false, false],
       },
       ready: state.ready,
       message: state.message,
@@ -7109,6 +7161,9 @@ function renderGameToText() {
       room_code: state.rtcRoomCode,
       waiting: state.rtcWaiting,
       pending_start: state.rtcPendingStart,
+      match_restart_ready: Array.isArray(state.matchRestartReadyByPlayer)
+        ? [...state.matchRestartReadyByPlayer]
+        : [false, false],
     },
     round_transition: state.roundTransition?.open
       ? {
