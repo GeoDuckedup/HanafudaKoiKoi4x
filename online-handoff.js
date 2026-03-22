@@ -61,7 +61,11 @@
           playerIndex: asPlayerIndex(lastActorIndex, "lastExportMeta.playerIndex"),
         };
       }
-      setFriendInterstitialOpen(true, nextPlayerIndex);
+      if (isOnlineFriendSessionActive()) {
+        setFriendInterstitialOpen(false, nextPlayerIndex);
+      } else {
+        setFriendInterstitialOpen(true, nextPlayerIndex);
+      }
     }
 
     function dispatchFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex) {

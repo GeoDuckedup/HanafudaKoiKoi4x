@@ -660,6 +660,12 @@ button.ghost {
   pointer-events: none;
 }
 
+.hand.player.waiting-view {
+  opacity: 0.55;
+  filter: saturate(0.68) contrast(0.88) brightness(0.72);
+  pointer-events: none;
+}
+
 .hand-lock-note {
   margin: 0 8px 4px;
   font-size: 0.7rem;
@@ -828,9 +834,7 @@ button.ghost {
 }
 
 .capture-summary-card.recent-capture .capture-summary-count {
-  background: #5e420f;
-  border-color: #fff0a4;
-  color: #fff8d7;
+  color: #fff2b2;
 }
 
 .yaku-line {
@@ -877,6 +881,46 @@ button.ghost {
   padding: 6px;
   min-height: 54px;
   align-items: center;
+}
+
+.context-status[hidden] {
+  display: none !important;
+}
+
+.context-status {
+  display: none;
+  min-width: 0;
+}
+
+.context-zone.is-waiting-online {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.context-zone.is-waiting-online .context-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 1px 4px 1px 2px;
+}
+
+.context-status-title {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #54442f;
+  line-height: 1.1;
+}
+
+.context-status-detail {
+  font-size: 0.64rem;
+  line-height: 1.15;
+  color: #7a6a56;
+}
+
+.context-zone.is-waiting-online .context-btn {
+  flex: 0 0 auto;
+  min-width: 96px;
 }
 
 .context-btn {
@@ -1759,6 +1803,10 @@ button.ghost {
   .field-layout {
     grid-template-columns: minmax(0, 1fr) 104px;
     gap: 10px;
+  }
+
+  .context-zone.is-waiting-online .context-btn {
+    min-width: 108px;
   }
 
   .draw-preview-card canvas {

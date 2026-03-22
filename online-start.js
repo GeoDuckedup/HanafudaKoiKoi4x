@@ -284,6 +284,8 @@
       if (ui.startModeCpuBtn) ui.startModeCpuBtn.hidden = isOpen;
       if (ui.startModeFriendBtn) ui.startModeFriendBtn.hidden = isOpen;
       if (ui.startModeOnlineBtn) ui.startModeOnlineBtn.hidden = isOpen;
+      if (ui.startDeckBtn) ui.startDeckBtn.hidden = isOpen;
+      if (ui.startThemeBtn) ui.startThemeBtn.hidden = isOpen;
       if (isOpen && ui.startCurrentGamesPanel) ui.startCurrentGamesPanel.hidden = true;
       if (ui.startSubtitle) ui.startSubtitle.hidden = isOpen;
       if (ui.startLoadActions) ui.startLoadActions.hidden = isOpen;

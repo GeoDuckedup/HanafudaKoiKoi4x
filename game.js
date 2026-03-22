@@ -2813,6 +2813,9 @@ function cacheUI() {
   ui.cpuCaptured = document.getElementById("cpu-captured");
   ui.playerCaptured = document.getElementById("player-captured");
   ui.contextZone = document.getElementById("context-zone");
+  ui.contextStatus = document.getElementById("context-status");
+  ui.contextStatusTitle = document.getElementById("context-status-title");
+  ui.contextStatusDetail = document.getElementById("context-status-detail");
   ui.contextLeftBtn = document.getElementById("context-left-btn");
   ui.contextRightBtn = document.getElementById("context-right-btn");
   ui.codeToggle = document.getElementById("code-toggle");
@@ -4364,9 +4367,9 @@ function getLatestRoundOutcome() {
 
 function canRevealBottomHand() {
   if (!isFriendMode()) return true;
-  if (state.rtcWaiting) return false;
   if (isOnlineFriendSessionActive() && (state.rtcStatus === "disconnected" || state.rtcStatus === "error")) return false;
-  if (state.interstitial?.open) return false;
+  if (state.interstitial?.open && !isOnlineFriendSessionActive()) return false;
+  if (isOnlineFriendSessionActive() && state.rtcWaiting) return true;
   return getViewerPlayerIndex() === state.currentPlayer;
 }
 
@@ -5652,17 +5655,25 @@ function computeTurnCheckpointReady() {
   if (state.pendingSelection || state.awaitingDeckFlip || state.awaitingDecision) return false;
   if (state.aiPreview || state.cpuPhase1PreviewCardId) return false;
   if (state.turnReplay.active) return false;
-  if (isFriendMode()) return Boolean(state.interstitial?.open);
+  if (isFriendMode()) {
+    if (isOnlineFriendSessionActive()) return Boolean(state.rtcWaiting);
+    return Boolean(state.interstitial?.open);
+  }
   return true;
 }
 
 function renderFriendInterstitial() {
   if (!ui.friendInterstitial) return;
-  const waitingOnline = isFriendMode() && state.rtcWaiting;
   const savingOnlineTurn = isOnlineFriendSessionActive() && Boolean(state.rtcTurnSaveInFlight);
   const recoveryOnline =
     isOnlineFriendSessionActive() && (state.rtcStatus === "disconnected" || state.rtcStatus === "error");
-  const open = isFriendMode() && (Boolean(state.interstitial?.open) || waitingOnline || recoveryOnline);
+  const onlineSessionActive = isOnlineFriendSessionActive();
+  const open =
+    isFriendMode() &&
+    ((Boolean(state.interstitial?.open) && !onlineSessionActive) ||
+      savingOnlineTurn ||
+      recoveryOnline ||
+      Boolean(state.rtcOpponentAbandoned));
   ui.friendInterstitial.hidden = !open;
   if (!open) return;
 
@@ -5678,8 +5689,6 @@ function renderFriendInterstitial() {
     : null;
   const previousHandSummary =
     previousHandCount === null ? "" : ` (${previousName} ${Math.max(0, previousHandCount)}/8 cards left).`;
-  const onlineSessionActive = isOnlineFriendSessionActive();
-
   if (ui.friendInterstitialTitle) {
     ui.friendInterstitialTitle.textContent = `Pass to ${nextName}`;
   }
@@ -5816,50 +5825,6 @@ function renderFriendInterstitial() {
       ui.friendBackMenuBtn.hidden = false;
       ui.friendBackMenuBtn.disabled = false;
       ui.friendBackMenuBtn.textContent = reconnectFailed ? "Return to Menu" : "Back to Menu";
-    }
-    return;
-  }
-  if (waitingOnline) {
-    const rtcStatusText =
-      state.rtcStatus === "connected"
-        ? "Connected"
-        : state.rtcStatus === "connecting"
-          ? "Connecting"
-          : state.rtcStatus === "disconnected"
-            ? "Disconnected"
-            : state.rtcStatus === "error"
-              ? "Connection error"
-              : "Not connected";
-    if (ui.friendInterstitialTitle) {
-      ui.friendInterstitialTitle.textContent = "Online Turn Handoff";
-    }
-    if (ui.friendInterstitialText) {
-      const roomText = state.rtcRoomCode ? ` Room ${state.rtcRoomCode}.` : "";
-      const waitingText =
-        state.rtcRemotePresence === false
-          ? "Waiting for opponent to reconnect."
-          : "Waiting for opponent turn data.";
-      ui.friendInterstitialText.textContent = `${rtcStatusText}.${roomText} ${waitingText}`;
-    }
-    if (ui.friendContinueBtn) {
-      ui.friendContinueBtn.hidden = true;
-      ui.friendContinueBtn.disabled = true;
-    }
-    if (ui.friendLoadCodeBtn) {
-      ui.friendLoadCodeBtn.hidden = true;
-      ui.friendLoadCodeBtn.disabled = true;
-      ui.friendLoadCodeBtn.textContent = "Load Turn Link";
-    }
-    if (ui.friendCopyCodeBtn) {
-      ui.friendCopyCodeBtn.hidden = false;
-      ui.friendCopyCodeBtn.disabled = !String(state.rtcRoomCode || "").trim();
-      ui.friendCopyCodeBtn.textContent = "Copy Game URL";
-    }
-    if (ui.friendManualLoadWrap) ui.friendManualLoadWrap.hidden = true;
-    if (ui.friendBackMenuBtn) {
-      ui.friendBackMenuBtn.hidden = false;
-      ui.friendBackMenuBtn.disabled = false;
-      ui.friendBackMenuBtn.textContent = state.rtcPresenceTimeoutShown ? "Leave Game" : "Back to Menu";
     }
     return;
   }
@@ -6101,6 +6066,7 @@ function renderHands() {
   const topHand = state.players[topPlayerIndex].hand;
   const canRevealBottom = canRevealBottomHand();
   const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
+  const waitingOnlineView = isOnlineFriendSessionActive() && state.rtcWaiting && canRevealBottom;
 
   const previewId = !isFriendMode() && topPlayerIndex === 1 ? state.cpuPhase1PreviewCardId : null;
   let displayTopHand = topHand;
@@ -6148,6 +6114,7 @@ function renderHands() {
     ui.playerZone.classList.toggle("turn-ready", selectable);
   }
   ui.playerHand.classList.toggle("locked", inputLocked);
+  ui.playerHand.classList.toggle("waiting-view", waitingOnlineView);
 
   const bottomHand = state.players[bottomPlayerIndex].hand;
   if (!canRevealBottom) {
@@ -6397,17 +6364,10 @@ function renderChoiceMode() {
       noteText = state.turnReplay.note || "Replaying previous turn...";
       activeNote = true;
     } else if (state.rtcWaiting) {
-      const statusText =
-        state.rtcStatus === "connected"
-          ? "Connected"
-          : state.rtcStatus === "connecting"
-            ? "Connecting"
-            : state.rtcStatus === "disconnected"
-              ? "Disconnected"
-              : state.rtcStatus === "error"
-                ? "Error"
-                : "Idle";
-      noteText = `Online waiting (${statusText})${state.rtcRoomCode ? ` room ${state.rtcRoomCode}` : ""}.`;
+      noteText =
+        state.rtcRemotePresence === false
+          ? "Waiting for opponent to reconnect. You can review the board, captures, and your hand."
+          : "Waiting for opponent turn. You can review the board, captures, and your hand.";
       activeNote = false;
     } else if (pending) {
       noteText = getChoicePromptText(pending);
@@ -6541,11 +6501,20 @@ function setContextButton(button, { text, action, disabled, primary = false }) {
   button.classList.toggle("primary", Boolean(primary));
 }
 
+function setContextStatus(title = "", detail = "") {
+  if (!ui.contextStatus || !ui.contextStatusTitle || !ui.contextStatusDetail) return;
+  const hasStatus = Boolean(title || detail);
+  ui.contextStatus.hidden = !hasStatus;
+  ui.contextStatusTitle.textContent = title;
+  ui.contextStatusDetail.textContent = detail;
+}
+
 function renderContextBar() {
   if (!ui.contextLeftBtn || !ui.contextRightBtn) return;
-  ui.contextZone.classList.remove("single-action");
+  ui.contextZone.classList.remove("single-action", "is-waiting-online");
   ui.contextLeftBtn.hidden = false;
   ui.contextRightBtn.classList.remove("full");
+  setContextStatus();
 
   if (state.awaitingDecision && state.awaitingDecision.kind === "stopOrKoi") {
     const decision = state.awaitingDecision;
@@ -6624,6 +6593,39 @@ function renderContextBar() {
     return;
   }
 
+  if (state.rtcWaiting && isOnlineFriendSessionActive()) {
+    const statusText =
+      state.rtcStatus === "connected"
+        ? "Connected"
+        : state.rtcStatus === "connecting"
+          ? "Connecting"
+          : state.rtcStatus === "disconnected"
+            ? "Disconnected"
+            : state.rtcStatus === "error"
+              ? "Connection error"
+              : "Not connected";
+    const detailParts = [statusText];
+    if (state.rtcRoomCode) detailParts.push(`Room ${state.rtcRoomCode}`);
+    detailParts.push(
+      state.rtcRemotePresence === false ? "Opponent offline." : "Turn data updates automatically."
+    );
+    ui.contextZone.classList.add("is-waiting-online");
+    setContextStatus("Waiting for opponent turn", detailParts.join(" • "));
+    setContextButton(ui.contextLeftBtn, {
+      text: "Copy URL",
+      action: "wait-copy-url",
+      disabled: !String(state.rtcRoomCode || "").trim(),
+      primary: false,
+    });
+    setContextButton(ui.contextRightBtn, {
+      text: "Leave Game",
+      action: "wait-leave",
+      disabled: false,
+      primary: false,
+    });
+    return;
+  }
+
   setContextButton(ui.contextLeftBtn, {
     text: "Pass",
     action: "idle-pass",
@@ -6642,6 +6644,16 @@ function onContextActionClick(event) {
   const button = event.target.closest("button[data-action]");
   if (!button || button.disabled) return;
   const action = button.dataset.action;
+
+  if (action === "wait-copy-url") {
+    void onOnlineRoomUrlCopy();
+    return;
+  }
+
+  if (action === "wait-leave") {
+    onFriendBackToMenu();
+    return;
+  }
 
   if (action === "round-ready-p0") {
     void markRoundTransitionReady(0);
