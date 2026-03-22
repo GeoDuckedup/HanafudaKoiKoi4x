@@ -548,6 +548,36 @@
       );
     }
 
+    async function syncOnlineMatchOverSnapshot() {
+      if (!isOnlineFriendSessionActive()) return true;
+      if (state.rtcStatus !== "connected") return false;
+      let code = "";
+      try {
+        code = encodeStateForOnline();
+      } catch (err) {
+        console.warn("match-over snapshot encode failed", err);
+        return false;
+      }
+      return sendRtcSignalWithSnapshot(
+        {
+          type: "turn-code",
+          reason: "match-over",
+          gameNumber: state.gameNumber,
+          code,
+        },
+        {
+          snapshotCode: code,
+          context: "match-over-sync",
+          onSnapshotWriteFailed: () => {
+            setFriendInterstitialStatus("Final match save failed. Opponent may need to reconnect.", true);
+          },
+          onSendFailed: () => {
+            setFriendInterstitialStatus("Final match sync failed. Opponent may need to reconnect.", true);
+          },
+        }
+      );
+    }
+
     function beginOnlineFriendMatch() {
       if (!state.rtcPendingStart) return;
       const turnOwnerBeforeConnect = describeTurnOwnerForDebug(state.currentPlayer);
@@ -565,6 +595,7 @@
       startNewMatch({
         playMode: "friend",
         friendFlow: "hybrid",
+        maxGames: state.rtcRole === "host" ? state.startMatchLength : state.maxGames,
         forceDealerPlayerIndex: hostMovesFirst ? 0 : 1,
         forceCurrentPlayerIndex: hostMovesFirst ? 0 : 1,
       });
@@ -888,6 +919,7 @@
       sendRtcSignal,
       sendOnlineTurnCodeWithSnapshot,
       syncOnlineRoundTransitionSnapshot,
+      syncOnlineMatchOverSnapshot,
       beginOnlineFriendMatch,
       handleOnlineReconnect,
       handleRtcDisconnectAutoReconnect,

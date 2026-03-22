@@ -5,6 +5,7 @@ const SELECTED_DECK_STORAGE_KEY = "hkk_selected_deck";
 const CLASSIC_THEME_ID = "classicWarm";
 const PAPER_THEME_ID = "paperLight";
 const SELECTED_THEME_STORAGE_KEY = "hkk_selected_theme";
+const MATCH_LENGTH_OPTIONS = Object.freeze([3, 6, 12]);
 
 const CLASSIC_SHEET_PATHS = {
   jan: "assets/decks/classic/january.png",
@@ -550,6 +551,9 @@ function init() {
 
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
+  if (DEV_DECK_MODE) {
+    installDevDebugHelpers();
+  }
 }
 
 function getDeckDef(deckId) {
@@ -1258,6 +1262,10 @@ function applyOnlineWaitingStateFromCurrentTurn(reason) {
   return getOnlineSessionController().applyOnlineWaitingStateFromCurrentTurn(reason);
 }
 
+function syncOnlineMatchOverSnapshot() {
+  return getOnlineSessionController().syncOnlineMatchOverSnapshot();
+}
+
 function sendHostSessionInitSignal() {
   return getOnlineSessionController().sendHostSessionInitSignal();
 }
@@ -1378,6 +1386,23 @@ function normalizeStartModeMenuMode(mode) {
   return null;
 }
 
+function normalizeMatchLength(value) {
+  const numeric = Number(value || 0);
+  return MATCH_LENGTH_OPTIONS.includes(numeric) ? numeric : 12;
+}
+
+function getNextMatchLength(value) {
+  const normalized = normalizeMatchLength(value);
+  const currentIndex = MATCH_LENGTH_OPTIONS.indexOf(normalized);
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % MATCH_LENGTH_OPTIONS.length : 0;
+  return MATCH_LENGTH_OPTIONS[nextIndex];
+}
+
+function formatMatchLengthLabel(value) {
+  const normalized = normalizeMatchLength(value);
+  return `Match Length: ${normalized} Games`;
+}
+
 function getStartModeMenuTitle(mode) {
   if (mode === "cpu") return "Play CPU";
   if (mode === "local") return "Play Local";
@@ -1401,6 +1426,31 @@ function updateStartModeButtonStates() {
   if (ui.startModeNewBtn) ui.startModeNewBtn.classList.toggle("primary", panelOpen && !startModeLoadActive);
   if (ui.startModeLoadBtn) ui.startModeLoadBtn.classList.toggle("primary", panelOpen && startModeLoadActive);
   if (ui.startDeckBtn) ui.startDeckBtn.classList.toggle("primary", Boolean(ui.startDeckPanel && !ui.startDeckPanel.hidden));
+  renderStartMatchLengthUi();
+}
+
+function renderStartMatchLengthUi() {
+  const startMenuVisible = Boolean(ui.startMenu && !ui.startMenu.hidden);
+  const currentGamesOpen = Boolean(ui.startCurrentGamesPanel && !ui.startCurrentGamesPanel.hidden);
+  const onlinePanelOpen = Boolean(ui.startOnlinePanel && !ui.startOnlinePanel.hidden);
+  const currentMode = currentGamesOpen ? normalizeStartModeMenuMode(startModeMenuMode) : null;
+  const label = formatMatchLengthLabel(state.startMatchLength);
+
+  if (ui.startMatchLengthBtn) {
+    const showCpuLength = startMenuVisible && currentGamesOpen && currentMode === "cpu" && !startModeLoadActive;
+    ui.startMatchLengthBtn.hidden = !showCpuLength;
+    ui.startMatchLengthBtn.textContent = label;
+  }
+  if (ui.onlineMatchLengthBtn) {
+    const showOnlineLength = startMenuVisible && onlinePanelOpen;
+    ui.onlineMatchLengthBtn.hidden = !showOnlineLength;
+    ui.onlineMatchLengthBtn.textContent = label;
+  }
+}
+
+function onCycleStartMatchLength() {
+  state.startMatchLength = getNextMatchLength(state.startMatchLength);
+  renderStartMatchLengthUi();
 }
 
 function compareCurrentGamesMatches(a, b) {
@@ -2193,7 +2243,7 @@ function onStartModeNewGame() {
   if (mode === "cpu") {
     resetRtcSession({ closeConnection: true });
     hideStartMenu();
-    startNewMatch({ playMode: "cpu" });
+    startNewMatch({ playMode: "cpu", maxGames: state.startMatchLength });
     return;
   }
   if (mode === "local") {
@@ -2847,6 +2897,7 @@ function cacheUI() {
   ui.startThemeList = document.getElementById("start-theme-list");
   ui.startCurrentGamesPanel = document.getElementById("start-current-games-panel");
   ui.startCurrentGamesTitle = document.getElementById("start-current-games-title");
+  ui.startMatchLengthBtn = document.getElementById("start-match-length-btn");
   ui.startModeNewBtn = document.getElementById("start-mode-new-btn");
   ui.startModeLoadBtn = document.getElementById("start-mode-load-btn");
   ui.startCurrentGamesStatus = document.getElementById("start-current-games-status");
@@ -2857,6 +2908,7 @@ function cacheUI() {
   ui.startExpiredNoteText = document.getElementById("start-expired-note-text");
   ui.startExpiredNoteClose = document.getElementById("start-expired-note-close");
   ui.startOnlinePanel = document.getElementById("start-online-panel");
+  ui.onlineMatchLengthBtn = document.getElementById("online-match-length-btn");
   ui.onlineHostBtn = document.getElementById("online-host-btn");
   ui.onlineBackBtn = document.getElementById("online-back-btn");
   ui.onlineMoveOrder = document.getElementById("online-move-order");
@@ -2882,6 +2934,13 @@ function cacheUI() {
   ui.friendInterstitialStatus = document.getElementById("friend-interstitial-status");
   ui.rulesToggle = document.getElementById("rules-toggle");
   ui.rulesPanel = document.getElementById("rules-panel");
+  ui.matchRecap = document.getElementById("match-recap");
+  ui.matchRecapTitle = document.getElementById("match-recap-title");
+  ui.matchRecapScore = document.getElementById("match-recap-score");
+  ui.matchRecapDetail = document.getElementById("match-recap-detail");
+  ui.matchRecapColYou = document.getElementById("match-recap-col-you");
+  ui.matchRecapColCpu = document.getElementById("match-recap-col-cpu");
+  ui.matchRecapBody = document.getElementById("match-recap-body");
 }
 
 function bindUI() {
@@ -2914,11 +2973,13 @@ function bindUI() {
   ui.startThemeBtn?.addEventListener("click", onStartThemeToggleFromMenu);
   ui.startDeckList?.addEventListener("click", onDeckPickerClick);
   ui.startThemeList?.addEventListener("click", onThemePickerClick);
+  ui.startMatchLengthBtn?.addEventListener("click", onCycleStartMatchLength);
   ui.startModeNewBtn?.addEventListener("click", onStartModeNewGame);
   ui.startModeLoadBtn?.addEventListener("click", onStartModeLoadGame);
   ui.startCurrentGamesList?.addEventListener("click", onStartCurrentGamesListClick);
   ui.startExpiredNoteClose?.addEventListener("click", onStartExpiredNoteDismiss);
   ui.onlineHostBtn?.addEventListener("click", onOnlineHostFromMenu);
+  ui.onlineMatchLengthBtn?.addEventListener("click", onCycleStartMatchLength);
   ui.onlineMoveFirstBtn?.addEventListener("click", () => {
     getOnlineStartController().setOnlineHostMovesFirst(true);
   });
@@ -2955,6 +3016,7 @@ function preloadSheets() {
 }
 
 function showStartMenu() {
+  state.startMatchLength = normalizeMatchLength(state.maxGames);
   if (state.playMode === "cpu" && Array.isArray(state.players) && state.players.length === 2) {
     requestCpuAutosave("show-start-menu");
   }
@@ -2981,6 +3043,7 @@ function showStartMenu() {
   }
   renderDeckUi();
   renderThemeUi();
+  renderStartMatchLengthUi();
   refreshStartMenuAsyncUx();
   refreshCurrentGamesPanel();
 }
@@ -2995,6 +3058,7 @@ function hideStartMenu() {
   setStartOnlinePanelOpen(false);
   setStartManualLoadVisible(false);
   setFriendInterstitialOpen(false);
+  renderStartMatchLengthUi();
   setCodeStatus("", false, "start");
 }
 
@@ -4107,6 +4171,7 @@ function startNewMatch(options = {}) {
     options.forceCurrentPlayerIndex === 0 || options.forceCurrentPlayerIndex === 1
       ? options.forceCurrentPlayerIndex
       : null;
+  const maxGames = normalizeMatchLength(options.maxGames ?? state.startMatchLength ?? state.maxGames);
   clearRoundRuntimeTimers({
     resetTurnReplayVisual: true,
     resetDrawPreviewFxState: true,
@@ -4114,6 +4179,8 @@ function startNewMatch(options = {}) {
   setCaptureViewMode("expanded");
   state.playMode = playMode;
   state.friendFlow = friendFlow;
+  state.maxGames = maxGames;
+  state.startMatchLength = maxGames;
   const startingOnlineFriendSession = playMode === "friend" && Boolean(state.rtcRole && state.rtcRoomCode);
   cpuAutosaveMatchId = playMode === "cpu" ? (resumeMatchId || generateCpuSaveMatchId()) : null;
   localAutosaveMatchId =
@@ -5302,6 +5369,17 @@ function endRoundDraw() {
     state.roundTransition = createClosedRoundTransition();
     applyFinalMessage();
     addSystemLog(state.message);
+    if (isOnlineFriendSessionActive()) {
+      void Promise.resolve(syncOnlineMatchOverSnapshot())
+        .then((synced) => {
+          if (!synced) {
+            addSystemLog("Final match sync failed online. Opponent may need to reconnect.");
+          }
+        })
+        .catch(() => {
+          addSystemLog("Final match sync failed online. Opponent may need to reconnect.");
+        });
+    }
   } else {
     openRoundTransition({
       winnerIndex: null,
@@ -5387,6 +5465,17 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
     state.roundTransition = createClosedRoundTransition();
     applyFinalMessage();
     addSystemLog(state.message);
+    if (isOnlineFriendSessionActive()) {
+      void Promise.resolve(syncOnlineMatchOverSnapshot())
+        .then((synced) => {
+          if (!synced) {
+            addSystemLog("Final match sync failed online. Opponent may need to reconnect.");
+          }
+        })
+        .catch(() => {
+          addSystemLog("Final match sync failed online. Opponent may need to reconnect.");
+        });
+    }
   } else {
     openRoundTransition({
       winnerIndex,
@@ -5565,12 +5654,15 @@ function renderAll() {
   renderRtcStatusBadge();
   renderDeckUi();
   renderThemeUi();
+  renderStartMatchLengthUi();
   if (!Array.isArray(state.players) || state.players.length < 2 || !state.players[0] || !state.players[1]) {
+    renderMatchRecap();
     state.autoFocusTargetKey = null;
     return;
   }
   renderTop();
   renderRoundSummary();
+  renderMatchRecap();
   renderActionLog();
   renderChoiceMode();
   renderHands();
@@ -5598,10 +5690,14 @@ function renderAll() {
 function renderDocumentTitleAndOnlineRoomChip() {
   let nextTitle = "Koi-Koi";
   if (isOnlineFriendSessionActive()) {
-    const localPlayerIndex = getOnlineLocalPlayerIndex();
-    const turnOwner = state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : null;
-    const waiting = state.rtcWaiting || localPlayerIndex === null || turnOwner === null || localPlayerIndex !== turnOwner;
-    nextTitle = waiting ? "Waiting - Koi-Koi" : "Your turn - Koi-Koi";
+    if (state.matchOver) {
+      nextTitle = "Match Over - Koi-Koi";
+    } else {
+      const localPlayerIndex = getOnlineLocalPlayerIndex();
+      const turnOwner = state.currentPlayer === 0 || state.currentPlayer === 1 ? state.currentPlayer : null;
+      const waiting = state.rtcWaiting || localPlayerIndex === null || turnOwner === null || localPlayerIndex !== turnOwner;
+      nextTitle = waiting ? "Waiting - Koi-Koi" : "Your turn - Koi-Koi";
+    }
   }
   if (document.title !== nextTitle) {
     document.title = nextTitle;
@@ -5997,6 +6093,10 @@ function renderTop() {
 
 function renderRoundSummary() {
   if (!ui.roundSummaryBody) return;
+  ui.roundSummaryBody.innerHTML = buildRoundSummaryRowsHtml();
+}
+
+function buildRoundSummaryRowsHtml() {
   const playedByMonth = new Map();
   for (const entry of state.roundHistory) {
     if (!entry || typeof entry.month !== "number") continue;
@@ -6019,7 +6119,63 @@ function renderRoundSummary() {
     const p1 = entry.p1 ?? entry.cpu ?? 0;
     rows.push(`<tr><td>${monthName}</td><td>${p0}</td><td>${p1}</td><td class=\"${multClass}\">${multLabel}</td></tr>`);
   }
-  ui.roundSummaryBody.innerHTML = rows.join("");
+  return rows.join("");
+}
+
+function getMatchRecapPayload() {
+  if (!state.matchOver || !Array.isArray(state.players) || state.players.length < 2) {
+    return {
+      visible: false,
+      title: "",
+      scoreLine: "",
+      detail: "",
+    };
+  }
+  const p0 = Number(state.players[0]?.score || 0);
+  const p1 = Number(state.players[1]?.score || 0);
+  const localView = state.playMode === "cpu" || isOnlineFriendSessionActive();
+  const viewerIndex = localView ? getViewerPlayerIndex() : null;
+  const opponentIndex = viewerIndex === 0 ? 1 : 0;
+  let title = "Draw";
+  if (p0 !== p1) {
+    if (localView && (viewerIndex === 0 || viewerIndex === 1)) {
+      const viewerWon = (viewerIndex === 0 && p0 > p1) || (viewerIndex === 1 && p1 > p0);
+      title = viewerWon ? "You Won" : "You Lost";
+    } else {
+      const winnerIndex = p0 > p1 ? 0 : 1;
+      title = `${state.players[winnerIndex]?.name || `Player ${winnerIndex + 1}`} Won`;
+    }
+  }
+  const scoreLine =
+    localView && (viewerIndex === 0 || viewerIndex === 1)
+      ? `${state.players[viewerIndex]?.score ?? 0} - ${state.players[opponentIndex]?.score ?? 0}`
+      : `${p0} - ${p1}`;
+  const detail =
+    localView && (viewerIndex === 0 || viewerIndex === 1)
+      ? `${state.players[viewerIndex]?.name || "You"} vs ${state.players[opponentIndex]?.name || "Opponent"}`
+      : `${state.players[0]?.name || "Player 1"} vs ${state.players[1]?.name || "Player 2"}`;
+  return {
+    visible: true,
+    title,
+    scoreLine,
+    detail,
+  };
+}
+
+function renderMatchRecap() {
+  const recap = getMatchRecapPayload();
+  if (ui.capturedZone) ui.capturedZone.hidden = recap.visible;
+  if (ui.fieldZone) ui.fieldZone.hidden = recap.visible;
+  if (ui.playerZone) ui.playerZone.hidden = recap.visible;
+  if (!ui.matchRecap) return;
+  ui.matchRecap.hidden = !recap.visible;
+  if (!recap.visible) return;
+  if (ui.matchRecapTitle) ui.matchRecapTitle.textContent = recap.title;
+  if (ui.matchRecapScore) ui.matchRecapScore.textContent = recap.scoreLine;
+  if (ui.matchRecapDetail) ui.matchRecapDetail.textContent = recap.detail;
+  if (ui.matchRecapColYou) ui.matchRecapColYou.textContent = getSummaryColumnLabel(0);
+  if (ui.matchRecapColCpu) ui.matchRecapColCpu.textContent = getSummaryColumnLabel(1);
+  if (ui.matchRecapBody) ui.matchRecapBody.innerHTML = buildRoundSummaryRowsHtml();
 }
 
 function renderActionLog() {
@@ -6049,6 +6205,140 @@ function escapeHtml(text) {
 function formatYakuLine(yaku) {
   if (!yaku || yaku.points === 0) return "No set";
   return `${yaku.points} pts: ${yaku.names.join(", ")}`;
+}
+
+function installDevDebugHelpers() {
+  window.debug_force_match_recap = (options = {}) => forceDebugMatchRecap(options);
+}
+
+function buildDebugRecapRoundHistory(maxGames, p0Score, p1Score) {
+  const safeMaxGames = normalizeMatchLength(maxGames);
+  const rows = [];
+  let remainingP0 = Math.max(0, Number(p0Score) || 0);
+  let remainingP1 = Math.max(0, Number(p1Score) || 0);
+  for (let month = 1; month <= safeMaxGames; month += 1) {
+    const monthsLeft = safeMaxGames - month + 1;
+    const monthP0 = month === safeMaxGames ? remainingP0 : Math.min(remainingP0, Math.max(0, Math.ceil(remainingP0 / monthsLeft)));
+    const monthP1 = month === safeMaxGames ? remainingP1 : Math.min(remainingP1, Math.max(0, Math.ceil(remainingP1 / monthsLeft)));
+    remainingP0 -= monthP0;
+    remainingP1 -= monthP1;
+    const pointsAwarded = Math.max(monthP0, monthP1);
+    const multiplier = pointsAwarded >= 12 ? 3 : pointsAwarded >= 6 ? 2 : pointsAwarded > 0 ? 1 : 1;
+    rows.push({
+      month,
+      p0: monthP0,
+      p1: monthP1,
+      multiplier,
+      noScore: monthP0 === 0 && monthP1 === 0,
+    });
+  }
+  return rows;
+}
+
+function resolveDebugRecapScores(viewMode, result) {
+  const normalizedView =
+    viewMode === "online-host" || viewMode === "online-guest" || viewMode === "local" || viewMode === "cpu"
+      ? viewMode
+      : "cpu";
+  const normalizedResult = result === "loss" || result === "draw" ? result : "win";
+  if (normalizedResult === "draw") {
+    return { p0: 12, p1: 12 };
+  }
+  if (normalizedView === "online-guest") {
+    return normalizedResult === "win" ? { p0: 12, p1: 18 } : { p0: 18, p1: 12 };
+  }
+  return normalizedResult === "win" ? { p0: 18, p1: 12 } : { p0: 12, p1: 18 };
+}
+
+function forceDebugMatchRecap(options = {}) {
+  const viewMode =
+    options.view === "online-host" || options.view === "online-guest" || options.view === "local" || options.view === "cpu"
+      ? options.view
+      : "cpu";
+  const result = options.result === "loss" || options.result === "draw" ? options.result : "win";
+  const maxGames = normalizeMatchLength(options.maxGames);
+  const names =
+    options.names && typeof options.names === "object"
+      ? options.names
+      : {};
+  const scores = resolveDebugRecapScores(viewMode, result);
+
+  if (viewMode === "cpu") {
+    state.playMode = "cpu";
+    state.friendFlow = "hybrid";
+    state.players = [
+      createPlayer(String(names.you || "You"), true, "Player 1"),
+      createPlayer(String(names.opponent || "CPU"), false, "CPU"),
+    ];
+    state.viewerPlayerIndex = 0;
+    state.rtcRole = null;
+    state.rtcRoomCode = "";
+    state.rtcStatus = "idle";
+  } else {
+    state.playMode = "friend";
+    state.friendFlow = "hybrid";
+    state.players = [
+      createPlayer(String(names.p1 || "Player 1"), true, "Player 1"),
+      createPlayer(String(names.p2 || "Player 2"), true, "Player 2"),
+    ];
+    state.viewerPlayerIndex = viewMode === "online-guest" ? 1 : 0;
+    if (viewMode === "local") {
+      state.rtcRole = null;
+      state.rtcRoomCode = "";
+      state.rtcStatus = "idle";
+    } else {
+      state.rtcRole = viewMode === "online-guest" ? "guest" : "host";
+      state.rtcRoomCode = "DEBUGMATCH";
+      state.rtcStatus = "connected";
+    }
+  }
+
+  state.ready = true;
+  state.maxGames = maxGames;
+  state.startMatchLength = maxGames;
+  state.gameNumber = maxGames;
+  state.matchOver = true;
+  state.roundOver = true;
+  state.roundTransition = createClosedRoundTransition();
+  state.interstitial = { open: false, nextPlayerIndex: null };
+  state.pendingSelection = null;
+  state.awaitingDeckFlip = null;
+  state.awaitingDecision = null;
+  state.aiPreview = null;
+  state.cpuPhase1PreviewCardId = null;
+  state.turnReplay.active = false;
+  state.drawPile = [];
+  state.field = [];
+  state.tableMultiplier = 1;
+  state.lastKoiCaller = null;
+  state.roundSpecialTwoXPlayer = null;
+  state.nextRoundSpecialTwoXPlayer = null;
+  state.rtcWaiting = false;
+  state.rtcTurnSaveInFlight = false;
+  state.rtcPendingStart = false;
+  state.rtcReconnectInFlight = false;
+  state.rtcReconnectFailed = false;
+  state.rtcOpponentAbandoned = false;
+  state.rtcOpponentAbandonedBy = "";
+  state.players[0].score = scores.p0;
+  state.players[1].score = scores.p1;
+  state.players[0].hand = [];
+  state.players[1].hand = [];
+  state.players[0].captured = [];
+  state.players[1].captured = [];
+  state.players[0].yaku = { points: 0, names: [], triggerKeys: [] };
+  state.players[1].yaku = { points: 0, names: [], triggerKeys: [] };
+  state.roundHistory = buildDebugRecapRoundHistory(maxGames, scores.p0, scores.p1);
+  clearCapturedHighlights();
+  applyFinalMessage();
+  renderAll();
+  return {
+    ok: true,
+    view: viewMode,
+    result,
+    maxGames,
+    recap: getMatchRecapPayload(),
+  };
 }
 
 function getCardTypeBadgeText(type) {
@@ -6143,6 +6433,10 @@ function renderHands() {
 }
 
 function renderField() {
+  const waitingOnlineView = isOnlineFriendSessionActive() && state.rtcWaiting;
+  if (ui.fieldZone) {
+    ui.fieldZone.classList.toggle("waiting-view", waitingOnlineView);
+  }
   const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
   const pending =
     state.pendingSelection && interactivePlayerIndex !== null && state.pendingSelection.playerIndex === interactivePlayerIndex
@@ -6446,6 +6740,12 @@ function renderChoiceMode() {
 }
 
 function renderCaptured() {
+  if (state.matchOver) {
+    if (ui.capturedZone) ui.capturedZone.hidden = true;
+    if (ui.cpuCaptured) ui.cpuCaptured.innerHTML = "";
+    if (ui.playerCaptured) ui.playerCaptured.innerHTML = "";
+    return;
+  }
   const topPlayerIndex = getDisplayTopPlayerIndex();
   const bottomPlayerIndex = getDisplayBottomPlayerIndex();
   const cpuCaptured = getSortedCapturedForDisplay(state.players[topPlayerIndex].captured);
@@ -6793,6 +7093,7 @@ function renderGameToText() {
   const payload = {
     mode: state.matchOver ? "match-over" : state.roundOver ? "round-over" : state.awaitingDecision ? "decision" : "playing",
     play_mode: state.playMode,
+    max_games: state.maxGames,
     deck: {
       selected: getSelectedDeckId(),
       available: Object.keys(DECK_DEFS),
@@ -6841,6 +7142,7 @@ function renderGameToText() {
     round12_leader_at_start:
       state.roundLeaderAtStart === null ? null : state.players[state.roundLeaderAtStart].name,
     capture_view: getCaptureViewMode(),
+    match_recap: getMatchRecapPayload(),
     deck_count: state.drawPile.length,
     pending_selection:
       state.pendingSelection && state.pendingSelection.playerIndex === getDisplayBottomPlayerIndex()

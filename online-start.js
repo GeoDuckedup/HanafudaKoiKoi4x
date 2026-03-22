@@ -286,6 +286,10 @@
       if (ui.startModeOnlineBtn) ui.startModeOnlineBtn.hidden = isOpen;
       if (ui.startDeckBtn) ui.startDeckBtn.hidden = isOpen;
       if (ui.startThemeBtn) ui.startThemeBtn.hidden = isOpen;
+      if (ui.onlineMatchLengthBtn) {
+        ui.onlineMatchLengthBtn.hidden = !isOpen;
+        ui.onlineMatchLengthBtn.textContent = `Match Length: ${state.startMatchLength || 12} Games`;
+      }
       if (isOpen && ui.startCurrentGamesPanel) ui.startCurrentGamesPanel.hidden = true;
       if (ui.startSubtitle) ui.startSubtitle.hidden = isOpen;
       if (ui.startLoadActions) ui.startLoadActions.hidden = isOpen;
@@ -594,6 +598,7 @@
               startNewMatch({
                 playMode: "friend",
                 friendFlow: "hybrid",
+                maxGames: state.startMatchLength,
                 forceDealerPlayerIndex: hostMovesFirst ? 0 : 1,
                 forceCurrentPlayerIndex: hostMovesFirst ? 0 : 1,
               });

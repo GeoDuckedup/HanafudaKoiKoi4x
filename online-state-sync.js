@@ -33,6 +33,12 @@
 
     function applyOnlineWaitingStateFromCurrentTurn(reason) {
       if (!isOnlineFriendSessionActive()) return;
+      if (state.matchOver) {
+        state.rtcWaiting = false;
+        setFriendInterstitialOpen(false);
+        setFriendInterstitialStatus("", false);
+        return;
+      }
       if (state.roundTransition?.open && state.roundOver && !state.matchOver) {
         state.rtcWaiting = false;
         setFriendInterstitialOpen(false);

@@ -49,6 +49,10 @@ body[data-ui-theme="paperLight"] {
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
@@ -187,6 +191,7 @@ button.ghost {
 .field-zone,
 .captured-zone,
 .player-zone,
+.match-recap,
 .message-zone,
 .context-zone,
 .rules-panel,
@@ -341,6 +346,7 @@ button.ghost {
   padding: 0 8px;
   overflow-x: auto;
   scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .cpu-hand-strip {
@@ -663,7 +669,11 @@ button.ghost {
 .hand.player.waiting-view {
   opacity: 0.55;
   filter: saturate(0.68) contrast(0.88) brightness(0.72);
-  pointer-events: none;
+}
+
+.field-zone.waiting-view {
+  opacity: 0.55;
+  filter: saturate(0.68) contrast(0.88) brightness(0.72);
 }
 
 .hand-lock-note {
@@ -941,6 +951,49 @@ button.ghost {
 
 .summary-panel {
   padding: 8px;
+}
+
+.match-recap {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.match-recap[hidden] {
+  display: none !important;
+}
+
+.match-recap-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px 2px;
+  text-align: center;
+}
+
+.match-recap-title {
+  font-size: clamp(1.5rem, 3vw, 2.15rem);
+  font-weight: 900;
+  color: #4e2613;
+  letter-spacing: 0.02em;
+}
+
+.match-recap-score {
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #b5382d;
+}
+
+.match-recap-detail {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #6c5339;
+}
+
+.match-recap-table-wrap {
+  max-height: none;
 }
 
 .summary-panel[hidden] {
@@ -1226,6 +1279,11 @@ button.ghost {
 
 .start-mode-submenu-actions {
   grid-template-columns: 1fr 1fr;
+}
+
+#start-match-length-btn,
+#online-match-length-btn {
+  width: 100%;
 }
 
 .start-online-invite-actions {

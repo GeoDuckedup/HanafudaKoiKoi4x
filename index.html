@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Hanafuda Koi-Koi</title>
-    <link rel="stylesheet" href="style.css?v=20260322b" />
+    <link rel="stylesheet" href="style.css?v=20260322c" />
   </head>
   <body>
     <main class="app">
@@ -59,6 +59,27 @@
         </div>
         <div id="hand-lock-note" class="hand-lock-note is-muted"></div>
         <div id="player-hand" class="hand player"></div>
+      </section>
+
+      <section id="match-recap" class="match-recap" hidden>
+        <div class="match-recap-hero">
+          <div id="match-recap-title" class="match-recap-title">You Won</div>
+          <div id="match-recap-score" class="match-recap-score">0 - 0</div>
+          <div id="match-recap-detail" class="match-recap-detail">Full match recap</div>
+        </div>
+        <div class="summary-table-wrap match-recap-table-wrap">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th id="match-recap-col-you">You</th>
+                <th id="match-recap-col-cpu">CPU</th>
+                <th>Mult</th>
+              </tr>
+            </thead>
+            <tbody id="match-recap-body"></tbody>
+          </table>
+        </div>
       </section>
 
       <section id="context-zone" class="context-zone">
@@ -296,6 +317,7 @@
           <div class="current-games-head">
             <div id="start-current-games-title" class="current-games-title">Play Mode</div>
           </div>
+          <button id="start-match-length-btn" type="button" class="ghost" hidden>Match Length: 12 Games</button>
           <div class="start-actions start-mode-submenu-actions">
             <button id="start-mode-new-btn" type="button">New Game</button>
             <button id="start-mode-load-btn" type="button">Load Game</button>
@@ -312,6 +334,7 @@
               <button id="online-move-second-btn" type="button">Opponent goes first</button>
             </div>
           </div>
+          <button id="online-match-length-btn" type="button" class="ghost">Match Length: 12 Games</button>
           <div class="start-actions start-mode-actions">
             <button id="online-host-btn" type="button" class="primary">Start as Host</button>
           </div>
