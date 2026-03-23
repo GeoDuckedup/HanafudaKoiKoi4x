@@ -1,0 +1,215 @@
+{
+  "rules": {
+    "roomIndex": {
+      "$roomCode": {
+        ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/)",
+        ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+        ".validate": "!newData.exists() || (newData.hasChildren(['version','exists','hasHost','hasGuest','joinState','expiresAt','updatedAt']) && newData.child('version').isNumber() && newData.child('version').val() === 1 && newData.child('exists').isBoolean() && newData.child('exists').val() === true && newData.child('hasHost').isBoolean() && newData.child('hasGuest').isBoolean() && newData.child('joinState').isString() && (newData.child('joinState').val() === 'open' || newData.child('joinState').val() === 'full' || newData.child('joinState').val() === 'expired' || newData.child('joinState').val() === 'closed') && newData.child('expiresAt').isNumber() && newData.child('expiresAt').val() >= 0 && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() > 0)",
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "userRooms": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false,
+        "$roomCode": {
+          ".write": "auth != null && auth.uid === $uid && $roomCode.matches(/^[A-Z0-9]{10}$/) && (!newData.exists() || root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".validate": "!newData.exists() || (newData.hasChildren(['version','roomCode','role','joinState','expiresAt','lastActiveAt','updatedAt']) && newData.child('version').isNumber() && newData.child('version').val() === 1 && newData.child('roomCode').isString() && newData.child('roomCode').val() === $roomCode && newData.child('role').isString() && (newData.child('role').val() === 'host' || newData.child('role').val() === 'guest') && newData.child('joinState').isString() && (newData.child('joinState').val() === 'open' || newData.child('joinState').val() === 'full' || newData.child('joinState').val() === 'expired' || newData.child('joinState').val() === 'closed') && newData.child('expiresAt').isNumber() && newData.child('expiresAt').val() >= 0 && newData.child('lastActiveAt').isNumber() && newData.child('lastActiveAt').val() >= 0 && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() > 0)",
+          "version": {
+            ".validate": "newData.isNumber() && newData.val() === 1"
+          },
+          "roomCode": {
+            ".validate": "newData.isString() && newData.val() === $roomCode"
+          },
+          "role": {
+            ".validate": "newData.isString() && (newData.val() === 'host' || newData.val() === 'guest')"
+          },
+          "joinState": {
+            ".validate": "newData.isString() && (newData.val() === 'open' || newData.val() === 'full' || newData.val() === 'expired' || newData.val() === 'closed')"
+          },
+          "expiresAt": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "lastActiveAt": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "updatedAt": {
+            ".validate": "newData.isNumber() && newData.val() > 0"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "rooms": {
+      "$roomCode": {
+        ".read": false,
+        ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && !newData.exists() && (data.child('hostUid').val() === auth.uid || data.child('guestUid').val() === auth.uid)",
+        "hostUid": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (((!data.exists() || (root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() <= now)) && newData.isString() && newData.val() === auth.uid && (!root.child('rateLimits/roomCreation/' + auth.uid).exists() || (root.child('rateLimits/roomCreation/' + auth.uid).isNumber() && now - root.child('rateLimits/roomCreation/' + auth.uid).val() > 30000))) || (data.exists() && data.val() === auth.uid && (!newData.exists() || newData.val() === auth.uid)))",
+          ".validate": "!newData.exists() || (newData.isString() && newData.val() === auth.uid)"
+        },
+        "guestUid": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && root.child('rooms/' + $roomCode + '/hostUid').exists() && ((auth.uid === root.child('rooms/' + $roomCode + '/hostUid').val() && !newData.exists()) || (auth.uid !== root.child('rooms/' + $roomCode + '/hostUid').val() && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && root.child('rooms/' + $roomCode + '/abandoned').val() !== true && !data.exists() && newData.isString() && newData.val() === auth.uid) || (data.exists() && data.val() === auth.uid && newData.isString() && newData.val() === auth.uid) || (data.exists() && data.val() === auth.uid && !newData.exists()))",
+          ".validate": "!newData.exists() || (newData.isString() && newData.val() === auth.uid)"
+        },
+        "memberMap": {
+          "$uid": {
+            ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && auth.uid === $uid",
+            ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid) && auth.uid === $uid && newData.isString() && newData.val() === 'host') || ((root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid) && auth.uid === $uid && newData.isString() && newData.val() === 'guest') || ((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid) && !newData.exists()) || (auth.uid === $uid && !newData.exists()))",
+            ".validate": "!newData.exists() || (newData.isString() && (newData.val() === 'host' || newData.val() === 'guest'))"
+          }
+        },
+        "createdAt": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && ((!data.exists() && newData.isNumber() && newData.val() > 0) || (data.exists() && newData.isNumber() && (newData.val() === data.val() || (root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() <= now))) || !newData.exists())",
+          ".validate": "!newData.exists() || (newData.isNumber() && newData.val() > 0)"
+        },
+        "lastActiveAt": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !root.child('rooms/' + $roomCode + '/expiresAt').exists()) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !newData.exists()))",
+          ".validate": "!newData.exists() || (newData.isNumber() && newData.val() > 0)"
+        },
+        "expiresAt": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !root.child('rooms/' + $roomCode + '/expiresAt').exists()) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !newData.exists()))",
+          ".validate": "!newData.exists() || (newData.isNumber() && newData.val() > 0)"
+        },
+        "connected": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !root.child('rooms/' + $roomCode + '/expiresAt').exists()) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !newData.exists()))",
+          ".validate": "!newData.exists() || newData.isBoolean()"
+        },
+        "abandoned": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && ((((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now) && newData.isBoolean() && newData.val() === true) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !newData.exists()))",
+          ".validate": "!newData.exists() || (newData.isBoolean() && newData.val() === true)"
+        },
+        "abandonedBy": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && ((((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now) && newData.isString() && ((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && newData.val() === 'host') || (root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid && newData.val() === 'guest'))) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !newData.exists()))",
+          ".validate": "!newData.exists() || (newData.isString() && (newData.val() === 'host' || newData.val() === 'guest'))"
+        },
+        "messages": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && ((newData.exists() && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)) || (!newData.exists() && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)))",
+          "$messageId": {
+            ".validate": "newData.hasChildren(['from','type','payload','seq','ts']) && newData.child('from').isString() && ((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && newData.child('from').val() === 'host') || (root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid && newData.child('from').val() === 'guest')) && newData.child('type').isString() && (newData.child('type').val() === 'session-init' || newData.child('type').val() === 'turn-code' || newData.child('type').val() === 'round-ready' || newData.child('type').val() === 'ping' || newData.child('type').val() === 'pong') && newData.child('payload').isString() && newData.child('payload').val().length <= 16000 && newData.child('seq').isNumber() && newData.child('seq').val() >= 0 && newData.child('ts').isNumber()",
+            "from": {
+              ".validate": "newData.isString() && (newData.val() === 'host' || newData.val() === 'guest')"
+            },
+            "type": {
+              ".validate": "newData.isString() && (newData.val() === 'session-init' || newData.val() === 'turn-code' || newData.val() === 'round-ready' || newData.val() === 'ping' || newData.val() === 'pong')"
+            },
+            "payload": {
+              ".validate": "newData.isString() && newData.val().length <= 16000"
+            },
+            "seq": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            },
+            "ts": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "presence": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          "host": {
+            ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid",
+            ".validate": "!newData.exists() || (newData.isBoolean() && newData.val() === true)"
+          },
+          "guest": {
+            ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid",
+            ".validate": "!newData.exists() || (newData.isBoolean() && newData.val() === true)"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "snapshot": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && ((newData.exists() && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)) || (!newData.exists() && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)))",
+          ".validate": "newData.hasChildren(['state','turnIndex','updatedAt']) && newData.child('state').isString() && newData.child('state').val().length > 0 && newData.child('state').val().length <= 16000 && newData.child('turnIndex').isNumber() && newData.child('turnIndex').val() >= 0 && newData.child('updatedAt').isNumber()",
+          "state": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 16000"
+          },
+          "turnIndex": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "updatedAt": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "summary": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && ((newData.exists() && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)) || (!newData.exists() && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)))",
+          ".validate": "!newData.exists() || (newData.hasChildren(['version','hostName','guestName','hostScore','guestScore','round','month','turnOwner','status','finished','updatedAt']) && newData.child('version').isNumber() && newData.child('version').val() === 1 && newData.child('hostName').isString() && newData.child('guestName').isString() && newData.child('hostScore').isNumber() && newData.child('hostScore').val() >= 0 && newData.child('guestScore').isNumber() && newData.child('guestScore').val() >= 0 && newData.child('round').isNumber() && newData.child('round').val() >= 1 && newData.child('month').isNumber() && newData.child('month').val() >= 1 && newData.child('month').val() <= 12 && newData.child('turnOwner').isString() && (newData.child('turnOwner').val() === 'host' || newData.child('turnOwner').val() === 'guest' || newData.child('turnOwner').val() === 'none') && newData.child('status').isString() && (newData.child('status').val() === 'waiting' || newData.child('status').val() === 'active' || newData.child('status').val() === 'finished' || newData.child('status').val() === 'closed' || newData.child('status').val() === 'expired') && newData.child('finished').isBoolean() && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() > 0)",
+          "version": {
+            ".validate": "newData.isNumber() && newData.val() === 1"
+          },
+          "hostName": {
+            ".validate": "newData.isString()"
+          },
+          "guestName": {
+            ".validate": "newData.isString()"
+          },
+          "hostScore": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "guestScore": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "round": {
+            ".validate": "newData.isNumber() && newData.val() >= 1"
+          },
+          "month": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 12"
+          },
+          "turnOwner": {
+            ".validate": "newData.isString() && (newData.val() === 'host' || newData.val() === 'guest' || newData.val() === 'none')"
+          },
+          "status": {
+            ".validate": "newData.isString() && (newData.val() === 'waiting' || newData.val() === 'active' || newData.val() === 'finished' || newData.val() === 'closed' || newData.val() === 'expired')"
+          },
+          "finished": {
+            ".validate": "newData.isBoolean()"
+          },
+          "updatedAt": {
+            ".validate": "newData.isNumber() && newData.val() > 0"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "updatedAt": {
+          ".read": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid)",
+          ".write": "auth != null && $roomCode.matches(/^[A-Z0-9]{10}$/) && (((root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid || root.child('rooms/' + $roomCode + '/guestUid').val() === auth.uid) && root.child('rooms/' + $roomCode + '/expiresAt').isNumber() && root.child('rooms/' + $roomCode + '/expiresAt').val() > now) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !root.child('rooms/' + $roomCode + '/expiresAt').exists()) || (root.child('rooms/' + $roomCode + '/hostUid').val() === auth.uid && !newData.exists()))",
+          ".validate": "!newData.exists() || (newData.isNumber() && newData.val() > 0)"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "rateLimits": {
+      "roomCreation": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.isNumber() && newData.val() > 0"
+        }
+      }
+    }
+  }
+}
